@@ -1,23 +1,25 @@
-use soroban_sdk::{contracttype, Address, Env, String};
+use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 /// Unique identifier for an escrow.
-/// Prepared for future multi-escrow support.
 pub type EscrowId = u64;
 
 /// All possible states an escrow can be in.
 #[contracttype]
 #[derive(Clone, PartialEq, Debug)]
 pub enum EscrowStatus {
-    /// Funds locked, waiting for freelancer to submit work.
     Active,
-    /// Freelancer submitted work, waiting for payer approval.
     WorkSubmitted,
-    /// Payer approved — funds released to freelancer.
     Completed,
-    /// Payer cancelled before work was submitted — funds refunded.
     Cancelled,
-    /// Deadline passed — payer reclaimed funds.
     Expired,
+}
+
+/// Recipient of accrued yield.
+#[contracttype]
+#[derive(Clone, PartialEq, Debug)]
+pub enum YieldRecipient {
+    Payer,
+    Freelancer,
 }
 
 /// The core escrow data stored on-chain.
@@ -26,13 +28,42 @@ pub enum EscrowStatus {
 pub struct EscrowData {
     pub payer: Address,
     pub freelancer: Address,
-    /// Token contract address — stored at creation, used by approve/cancel/expire.
     pub token: Address,
     pub amount: i128,
     pub milestone: String,
     pub status: EscrowStatus,
-    /// Optional ledger timestamp after which the payer can reclaim funds.
     pub deadline: Option<u64>,
+    pub yield_protocol: Option<Address>,
+    pub principal_deposited: i128,
+    pub yield_recipient: YieldRecipient,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RateLimitConfig {
+    pub admin: Address,
+    pub max_per_window: u32,
+    pub window_duration: u64,
+    pub min_amount: i128,
+    pub max_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PayerStats {
+    pub window_start: u64,
+    pub count: u32,
+}
+
+#[contracttype]
+pub enum RateKey {
+    Config,
+    PayerStats(Address),
+}
+
+#[contracttype]
+pub enum AllowListKey {
+    Tokens,
 }
 
 /// Protocol-level configuration (admin, pause state, fee).
@@ -52,11 +83,12 @@ pub enum DataKey {
     Config,
 }
 
-/// Default escrow ID for single-escrow mode.
 const DEFAULT_ESCROW_ID: EscrowId = 0;
 
 pub fn save_escrow(env: &Env, data: &EscrowData) {
-    env.storage().instance().set(&DataKey::Escrow(DEFAULT_ESCROW_ID), data);
+    env.storage()
+        .instance()
+        .set(&DataKey::Escrow(DEFAULT_ESCROW_ID), data);
 }
 
 pub fn load_escrow(env: &Env) -> EscrowData {
@@ -67,7 +99,92 @@ pub fn load_escrow(env: &Env) -> EscrowData {
 }
 
 pub fn has_escrow(env: &Env) -> bool {
-    env.storage().instance().has(&DataKey::Escrow(DEFAULT_ESCROW_ID))
+    env.storage()
+        .instance()
+        .has(&DataKey::Escrow(DEFAULT_ESCROW_ID))
+}
+
+pub fn read_config(env: &Env) -> Option<RateLimitConfig> {
+    env.storage().instance().get(&RateKey::Config)
+}
+
+pub fn write_config(env: &Env, config: &RateLimitConfig) {
+    env.storage().instance().set(&RateKey::Config, config);
+}
+
+pub fn read_payer_stats(env: &Env, payer: &Address) -> Option<PayerStats> {
+    env.storage()
+        .instance()
+        .get(&RateKey::PayerStats(payer.clone()))
+}
+
+pub fn write_payer_stats(env: &Env, payer: &Address, stats: &PayerStats) {
+    env.storage()
+        .instance()
+        .set(&RateKey::PayerStats(payer.clone()), stats);
+}
+
+pub fn check_and_update_rate_limit(
+    env: &Env,
+    payer: Address,
+    config: RateLimitConfig,
+) -> Result<(), ()> {
+    let current_time = env.ledger().timestamp();
+
+    let stats = read_payer_stats(env, &payer).unwrap_or(PayerStats {
+        window_start: current_time,
+        count: 0,
+    });
+
+    let mut stats = stats;
+
+    if current_time >= stats.window_start.saturating_add(config.window_duration) {
+        stats.window_start = current_time;
+        stats.count = 0;
+    }
+
+    if stats.count >= config.max_per_window {
+        return Err(());
+    }
+
+    stats.count = stats.count.saturating_add(1);
+    write_payer_stats(env, &payer, &stats);
+
+    Ok(())
+}
+
+pub fn read_allowed_tokens(env: &Env) -> Vec<Address> {
+    env.storage()
+        .instance()
+        .get(&AllowListKey::Tokens)
+        .unwrap_or_default()
+}
+
+pub fn write_allowed_tokens(env: &Env, tokens: &Vec<Address>) {
+    env.storage().instance().set(&AllowListKey::Tokens, tokens);
+}
+
+pub fn add_to_allowlist(env: &Env, token: Address) -> bool {
+    let mut tokens = read_allowed_tokens(env);
+    if tokens.contains(&token) {
+        false
+    } else {
+        tokens.push(token);
+        write_allowed_tokens(env, &tokens);
+        true
+    }
+}
+
+pub fn remove_from_allowlist(env: &Env, token: Address) -> bool {
+    let mut tokens = read_allowed_tokens(env);
+    let before = tokens.len();
+    tokens.retain(|t| t != &token);
+    if tokens.len() < before {
+        write_allowed_tokens(env, &tokens);
+        true
+    } else {
+        false
+    }
 }
 
 pub fn save_config(env: &Env, config: &ProtocolConfig) {
