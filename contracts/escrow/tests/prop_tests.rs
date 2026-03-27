@@ -32,6 +32,7 @@ fn setup(amount: i128) -> (Env, Address, Address, Address, TokenClient<'static>,
     let payer = Address::generate(&env);
     let freelancer = Address::generate(&env);
     let admin = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
 
     let token_addr = env.register_stellar_asset_contract_v2(admin.clone());
     let token: TokenClient<'static> = unsafe {
@@ -47,6 +48,8 @@ fn setup(amount: i128) -> (Env, Address, Address, Address, TokenClient<'static>,
         std::mem::transmute(EscrowContractClient::new(&env, &contract_addr))
     };
 
+    contract.init(&admin, &0u32, &fee_collector);
+
     (env, payer, freelancer, token_addr.address(), token, contract)
 }
 
@@ -60,12 +63,12 @@ proptest! {
         let (env, payer, freelancer, token_addr, token, contract) = setup(amount);
         let milestone = String::from_str(&env, "milestone");
 
-        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone);
+        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone, &None);
         prop_assert_eq!(token.balance(&contract.address), amount);
         prop_assert_eq!(token.balance(&payer), 0);
 
         contract.submit_work();
-        contract.approve(&token_addr);
+        contract.approve();
 
         // Invariant: contract balance returns to 0; freelancer received full amount.
         prop_assert_eq!(token.balance(&contract.address), 0);
@@ -78,10 +81,10 @@ proptest! {
         let (env, payer, freelancer, token_addr, token, contract) = setup(amount);
         let milestone = String::from_str(&env, "milestone");
 
-        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone);
+        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone, &None);
         prop_assert_eq!(token.balance(&contract.address), amount);
 
-        contract.cancel(&token_addr);
+        contract.cancel();
 
         // Invariant: contract balance returns to 0; payer fully refunded.
         prop_assert_eq!(token.balance(&contract.address), 0);
@@ -101,13 +104,13 @@ proptest! {
         let (env, payer, freelancer, token_addr, _token, contract) = setup(amount);
         let milestone = String::from_str(&env, "milestone");
 
-        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone);
+        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone, &None);
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::Active);
 
         contract.submit_work();
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::WorkSubmitted);
 
-        contract.approve(&token_addr);
+        contract.approve();
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::Completed);
     }
 }
@@ -115,20 +118,17 @@ proptest! {
 // ── Invariant 3: authorization ────────────────────────────────────────────────
 
 proptest! {
-    /// A random amount must not affect the authorization check:
-    /// cancel() must panic when called after work is submitted (wrong state),
-    /// and approve() must panic when called before work is submitted (wrong state).
-    /// These guard the state-machine boundaries regardless of the escrow amount.
+    /// approve() must panic when called before work is submitted (wrong state).
     #[test]
     fn prop_approve_requires_work_submitted(amount in 1i128..=1_000_000i128) {
         let (env, payer, freelancer, token_addr, _token, contract) = setup(amount);
         let milestone = String::from_str(&env, "milestone");
 
-        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone);
+        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone, &None);
 
         // Invariant: approve() before submit_work() must always be rejected.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            contract.approve(&token_addr);
+            contract.approve();
         }));
         prop_assert!(result.is_err(), "approve before submit must panic");
     }
@@ -139,12 +139,12 @@ proptest! {
         let (env, payer, freelancer, token_addr, _token, contract) = setup(amount);
         let milestone = String::from_str(&env, "milestone");
 
-        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone);
+        contract.create(&payer, &freelancer, &token_addr, &amount, &milestone, &None);
         contract.submit_work();
 
         // Invariant: cancel() after work is submitted must always be rejected.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            contract.cancel(&token_addr);
+            contract.cancel();
         }));
         prop_assert!(result.is_err(), "cancel after submit must panic");
     }

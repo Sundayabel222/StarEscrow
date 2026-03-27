@@ -9,4 +9,6 @@ pub enum EscrowError {
     InvalidAmount = 4,
     DeadlineNotPassed = 5,
     NotExpired = 6,
+    Unauthorized = 7,
+    Paused = 8,
 }

@@ -34,3 +34,24 @@ pub fn escrow_expired(env: &Env, payer: &Address, amount: i128) {
         (payer.clone(), amount),
     );
 }
+
+pub fn freelancer_transferred(env: &Env, old: &Address, new: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "freelancer_transferred"),),
+        (old.clone(), new.clone()),
+    );
+}
+
+pub fn contract_paused(env: &Env, admin: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "contract_paused"),),
+        (admin.clone(),),
+    );
+}
+
+pub fn contract_unpaused(env: &Env, admin: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "contract_unpaused"),),
+        (admin.clone(),),
+    );
+}

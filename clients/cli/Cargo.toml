@@ -8,6 +8,6 @@ name = "star-escrow"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 serde_json = "1"
