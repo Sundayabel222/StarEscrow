@@ -4,10 +4,11 @@ mod errors;
 mod events;
 mod storage;
 
-pub use errors::EscrowError;
 pub use storage::{EscrowData, EscrowStatus};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
+use soroban_sdk::{
+    contract, contractimpl, token, Address, Env, String,
+};
 
 #[contract]
 pub struct EscrowContract;
