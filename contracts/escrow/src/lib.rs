@@ -3,10 +3,11 @@
 mod events;
 mod storage;
 
+pub use storage::{EscrowData, EscrowStatus};
+
 use soroban_sdk::{
     contract, contractimpl, token, Address, Env, String,
 };
-use storage::{EscrowData, EscrowStatus};
 
 #[contract]
 pub struct EscrowContract;
