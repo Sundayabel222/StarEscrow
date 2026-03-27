@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use serde_json::Value;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -92,6 +93,21 @@ enum Commands {
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
     },
+
+    /// List all escrows created by a payer address
+    List {
+        /// Contract ID to query events from (or set ESCROW_CONTRACT_ID env var)
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Payer Stellar address to filter by
+        #[arg(long)]
+        payer: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -179,6 +195,70 @@ fn main() -> Result<()> {
                 .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
 
             println!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+
+        Commands::List { contract_id, payer, json } => {
+            list_escrows(&cli.rpc_url, &cli.network_passphrase, &contract_id, &payer, json)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Query `escrow_created` events for a given payer and display results.
+fn list_escrows(rpc_url: &str, network_passphrase: &str, contract_id: &str, payer: &str, as_json: bool) -> Result<()> {
+    let output = std::process::Command::new("stellar")
+        .args([
+            "contract", "events",
+            "--id", contract_id,
+            "--rpc-url", rpc_url,
+            "--network-passphrase", network_passphrase,
+            "--output", "json",
+        ])
+        .output()
+        .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let events: Vec<Value> = serde_json::from_str(&raw)
+        .unwrap_or_else(|_| vec![]);
+
+    // Each event: { "topic": [...], "value": [...] }
+    // topic[0] == "escrow_created", value == [payer, freelancer, amount, milestone]
+    let mut escrows: Vec<Value> = events
+        .into_iter()
+        .filter(|e| {
+            let topic0 = e["topic"][0].as_str().unwrap_or("");
+            let event_payer = e["value"][0].as_str().unwrap_or("");
+            topic0 == "escrow_created" && event_payer == payer
+        })
+        .map(|e| {
+            serde_json::json!({
+                "contract_id": contract_id,
+                "payer": e["value"][0],
+                "freelancer": e["value"][1],
+                "amount": e["value"][2],
+                "milestone": e["value"][3],
+            })
+        })
+        .collect();
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&escrows)?);
+    } else {
+        if escrows.is_empty() {
+            println!("No escrows found for payer {payer}");
+        } else {
+            println!("Escrows for payer {payer}:");
+            for (i, e) in escrows.iter_mut().enumerate() {
+                println!(
+                    "  [{}] contract={} milestone={} amount={} freelancer={}",
+                    i + 1,
+                    e["contract_id"].as_str().unwrap_or("-"),
+                    e["milestone"].as_str().unwrap_or("-"),
+                    e["amount"],
+                    e["freelancer"].as_str().unwrap_or("-"),
+                );
+            }
         }
     }
 
