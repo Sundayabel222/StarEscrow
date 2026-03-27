@@ -12,6 +12,8 @@ pub enum EscrowStatus {
     Completed,
     /// Payer cancelled before work was submitted — funds refunded.
     Cancelled,
+    /// Deadline passed — payer reclaimed funds.
+    Expired,
 }
 
 /// The core escrow data stored on-chain.
@@ -20,9 +22,13 @@ pub enum EscrowStatus {
 pub struct EscrowData {
     pub payer: Address,
     pub freelancer: Address,
+    /// Token contract address — stored at creation, used by approve/cancel/expire.
+    pub token: Address,
     pub amount: i128,
     pub milestone: String,
     pub status: EscrowStatus,
+    /// Optional ledger timestamp after which the payer can reclaim funds.
+    pub deadline: Option<u64>,
 }
 
 /// Storage key for the escrow record.

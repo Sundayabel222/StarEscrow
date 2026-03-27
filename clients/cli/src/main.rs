@@ -15,10 +15,7 @@ struct Cli {
     rpc_url: String,
 
     /// Network passphrase
-    #[arg(
-        long,
-        default_value = "Test SDF Network ; September 2015"
-    )]
+    #[arg(long, default_value = "Test SDF Network ; September 2015")]
     network_passphrase: String,
 
     #[command(subcommand)]
@@ -29,11 +26,9 @@ struct Cli {
 enum Commands {
     /// Create a new escrow and lock funds
     Create {
-        /// Contract ID (or set ESCROW_CONTRACT_ID env var)
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
 
-        /// Payer secret key (or set PAYER_SECRET env var)
         #[arg(long, env = "PAYER_SECRET")]
         payer_secret: String,
 
@@ -52,6 +47,11 @@ enum Commands {
         /// Milestone description
         #[arg(long)]
         milestone: String,
+
+        /// Optional deadline as a ledger timestamp (Unix seconds). After this
+        /// time the payer can call `expire` to reclaim funds.
+        #[arg(long)]
+        deadline: Option<u64>,
     },
 
     /// Freelancer submits work
@@ -70,9 +70,7 @@ enum Commands {
 
         #[arg(long, env = "PAYER_SECRET")]
         payer_secret: String,
-
-        #[arg(long)]
-        token: String,
+        // token is now stored in contract storage — no longer needed here
     },
 
     /// Payer cancels escrow and gets refund (only before work submitted)
@@ -82,12 +80,19 @@ enum Commands {
 
         #[arg(long, env = "PAYER_SECRET")]
         payer_secret: String,
-
-        #[arg(long)]
-        token: String,
+        // token is now stored in contract storage — no longer needed here
     },
 
-    /// Read current escrow state
+    /// Payer reclaims funds after the deadline has passed
+    Expire {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        #[arg(long, env = "PAYER_SECRET")]
+        payer_secret: String,
+    },
+
+    /// Read current escrow status (lightweight — no full struct)
     Status {
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
@@ -105,21 +110,34 @@ fn main() -> Result<()> {
             token,
             amount,
             milestone,
+            deadline,
         } => {
             println!("Creating escrow on contract {contract_id}...");
+            let mut extra: Vec<String> = vec![
+                "--payer".into(),
+                stellar_address_from_secret(&payer_secret)?,
+                "--freelancer".into(),
+                freelancer,
+                "--token".into(),
+                token,
+                "--amount".into(),
+                amount.to_string(),
+                "--milestone".into(),
+                milestone,
+                "--deadline".into(),
+            ];
+            // Pass None as the XDR-encoded Option<u64>
+            match deadline {
+                Some(d) => extra.push(d.to_string()),
+                None => extra.push("null".into()),
+            }
             invoke_stellar_cli(
                 &cli.rpc_url,
                 &cli.network_passphrase,
                 &contract_id,
                 &payer_secret,
                 "create",
-                &[
-                    "--payer",    &stellar_address_from_secret(&payer_secret)?,
-                    "--freelancer", &freelancer,
-                    "--token",    &token,
-                    "--amount",   &amount.to_string(),
-                    "--milestone", &milestone,
-                ],
+                &extra.iter().map(String::as_str).collect::<Vec<_>>(),
             )?;
             println!("Escrow created. Funds locked.");
         }
@@ -137,7 +155,7 @@ fn main() -> Result<()> {
             println!("Work submitted. Waiting for payer approval.");
         }
 
-        Commands::Approve { contract_id, payer_secret, token } => {
+        Commands::Approve { contract_id, payer_secret } => {
             println!("Approving milestone and releasing payment...");
             invoke_stellar_cli(
                 &cli.rpc_url,
@@ -145,12 +163,12 @@ fn main() -> Result<()> {
                 &contract_id,
                 &payer_secret,
                 "approve",
-                &["--token", &token],
+                &[],
             )?;
             println!("Payment released to freelancer.");
         }
 
-        Commands::Cancel { contract_id, payer_secret, token } => {
+        Commands::Cancel { contract_id, payer_secret } => {
             println!("Cancelling escrow...");
             invoke_stellar_cli(
                 &cli.rpc_url,
@@ -158,14 +176,26 @@ fn main() -> Result<()> {
                 &contract_id,
                 &payer_secret,
                 "cancel",
-                &["--token", &token],
+                &[],
             )?;
             println!("Escrow cancelled. Funds refunded to payer.");
         }
 
+        Commands::Expire { contract_id, payer_secret } => {
+            println!("Expiring escrow and reclaiming funds...");
+            invoke_stellar_cli(
+                &cli.rpc_url,
+                &cli.network_passphrase,
+                &contract_id,
+                &payer_secret,
+                "expire",
+                &[],
+            )?;
+            println!("Escrow expired. Funds returned to payer.");
+        }
+
         Commands::Status { contract_id } => {
             println!("Fetching escrow status for {contract_id}...");
-            // Read-only call — no signing needed, use a dummy source
             let output = std::process::Command::new("stellar")
                 .args([
                     "contract", "invoke",
@@ -173,7 +203,7 @@ fn main() -> Result<()> {
                     "--rpc-url", &cli.rpc_url,
                     "--network-passphrase", &cli.network_passphrase,
                     "--",
-                    "get_escrow",
+                    "get_status",
                 ])
                 .output()
                 .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
@@ -185,7 +215,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Shell out to the Stellar CLI to invoke a contract function.
 fn invoke_stellar_cli(
     rpc_url: &str,
     network_passphrase: &str,
@@ -216,7 +245,6 @@ fn invoke_stellar_cli(
     Ok(())
 }
 
-/// Derive the public address from a secret key using the stellar CLI.
 fn stellar_address_from_secret(secret: &str) -> Result<String> {
     let output = std::process::Command::new("stellar")
         .args(["keys", "address", secret])

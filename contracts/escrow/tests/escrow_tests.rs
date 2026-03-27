@@ -1,8 +1,9 @@
 #![cfg(test)]
 
 use escrow::{EscrowContract, EscrowContractClient};
+use escrow::EscrowError;
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, String,
 };
@@ -36,7 +37,6 @@ impl<'a> Setup<'a> {
         let (token, token_admin) = create_token(&env, &admin);
         let token_addr = token.address.clone();
 
-        // Mint 1000 tokens to payer
         token_admin.mint(&payer, &1000);
 
         let contract_addr = env.register_contract(None, EscrowContract);
@@ -46,28 +46,21 @@ impl<'a> Setup<'a> {
     }
 }
 
+// ── Happy path ────────────────────────────────────────────────────────────────
+
 #[test]
 fn test_full_happy_path() {
     let s = Setup::new();
     let milestone = String::from_str(&s.env, "Deliver MVP");
 
-    s.contract.create(
-        &s.payer,
-        &s.freelancer,
-        &s.token_addr,
-        &500,
-        &milestone,
-    );
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &500, &milestone, &None).unwrap();
 
-    // Payer balance reduced
     assert_eq!(s.token.balance(&s.payer), 500);
-    // Contract holds funds
     assert_eq!(s.token.balance(&s.contract.address), 500);
 
-    s.contract.submit_work();
-    s.contract.approve(&s.token_addr);
+    s.contract.submit_work().unwrap();
+    s.contract.approve().unwrap();
 
-    // Freelancer received funds
     assert_eq!(s.token.balance(&s.freelancer), 500);
     assert_eq!(s.token.balance(&s.contract.address), 0);
 }
@@ -77,17 +70,99 @@ fn test_cancel_refunds_payer() {
     let s = Setup::new();
     let milestone = String::from_str(&s.env, "Design mockups");
 
-    s.contract.create(
-        &s.payer,
-        &s.freelancer,
-        &s.token_addr,
-        &300,
-        &milestone,
-    );
-
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &300, &milestone, &None).unwrap();
     assert_eq!(s.token.balance(&s.payer), 700);
 
-    s.contract.cancel(&s.token_addr);
+    s.contract.cancel().unwrap();
+
+    assert_eq!(s.token.balance(&s.payer), 1000);
+    assert_eq!(s.token.balance(&s.contract.address), 0);
+}
+
+// ── Typed error checks ────────────────────────────────────────────────────────
+
+#[test]
+fn test_cancel_after_submit_fails() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Write tests");
+
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &200, &milestone, &None).unwrap();
+    s.contract.submit_work().unwrap();
+
+    let err = s.contract.try_cancel().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotActive);
+}
+
+#[test]
+fn test_approve_before_submit_fails() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Deploy contract");
+
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None).unwrap();
+
+    let err = s.contract.try_approve().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::WorkNotSubmitted);
+}
+
+#[test]
+fn test_double_create_fails() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Phase 1");
+
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None).unwrap();
+
+    let err = s.contract
+        .try_create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::AlreadyExists);
+}
+
+#[test]
+fn test_invalid_amount_fails() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Phase 1");
+
+    let err = s.contract
+        .try_create(&s.payer, &s.freelancer, &s.token_addr, &0, &milestone, &None)
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
+
+// ── Deadline / expire ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_expire_before_deadline_fails() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Expire test");
+
+    // Set ledger time to 1000, deadline at 2000
+    s.env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    s.contract
+        .create(&s.payer, &s.freelancer, &s.token_addr, &500, &milestone, &Some(2000u64))
+        .unwrap();
+
+    let err = s.contract.try_expire().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::DeadlineNotPassed);
+}
+
+#[test]
+fn test_expire_after_deadline_succeeds() {
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Expire test");
+
+    s.env.ledger().with_mut(|l| l.timestamp = 1000);
+
+    s.contract
+        .create(&s.payer, &s.freelancer, &s.token_addr, &500, &milestone, &Some(2000u64))
+        .unwrap();
+
+    // Advance time past deadline
+    s.env.ledger().with_mut(|l| l.timestamp = 3000);
+
+    s.contract.expire().unwrap();
 
     // Payer gets refund
     assert_eq!(s.token.balance(&s.payer), 1000);
@@ -95,46 +170,60 @@ fn test_cancel_refunds_payer() {
 }
 
 #[test]
-#[should_panic(expected = "can only cancel before work is submitted")]
-fn test_cancel_after_submit_fails() {
+fn test_expire_without_deadline_fails() {
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "Write tests");
+    let milestone = String::from_str(&s.env, "No deadline");
 
-    s.contract.create(
-        &s.payer,
-        &s.freelancer,
-        &s.token_addr,
-        &200,
-        &milestone,
-    );
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &500, &milestone, &None).unwrap();
 
-    s.contract.submit_work();
-    s.contract.cancel(&s.token_addr); // should panic
+    let err = s.contract.try_expire().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotExpired);
+}
+
+// ── get_status ────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_get_status_lifecycle() {
+    use escrow::EscrowStatus;
+
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Status test");
+
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None).unwrap();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Active);
+
+    s.contract.submit_work().unwrap();
+    assert_eq!(s.contract.get_status(), EscrowStatus::WorkSubmitted);
+
+    s.contract.approve().unwrap();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Completed);
 }
 
 #[test]
-#[should_panic(expected = "work not submitted yet")]
-fn test_approve_before_submit_fails() {
+fn test_get_status_cancelled() {
+    use escrow::EscrowStatus;
+
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "Deploy contract");
+    let milestone = String::from_str(&s.env, "Cancel status");
 
-    s.contract.create(
-        &s.payer,
-        &s.freelancer,
-        &s.token_addr,
-        &100,
-        &milestone,
-    );
-
-    s.contract.approve(&s.token_addr); // should panic
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None).unwrap();
+    s.contract.cancel().unwrap();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Cancelled);
 }
 
 #[test]
-#[should_panic(expected = "escrow already exists")]
-fn test_double_create_fails() {
-    let s = Setup::new();
-    let milestone = String::from_str(&s.env, "Phase 1");
+fn test_get_status_expired() {
+    use escrow::EscrowStatus;
 
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone);
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone);
+    let s = Setup::new();
+    let milestone = String::from_str(&s.env, "Expired status");
+
+    s.env.ledger().with_mut(|l| l.timestamp = 100);
+    s.contract
+        .create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &Some(500u64))
+        .unwrap();
+
+    s.env.ledger().with_mut(|l| l.timestamp = 1000);
+    s.contract.expire().unwrap();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Expired);
 }
