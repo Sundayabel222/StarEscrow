@@ -1,5 +1,5 @@
 [package]
-name = "escrow"
+name = "reputation"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,7 +11,3 @@ soroban-sdk = { version = "21.0.0", features = ["alloc"] }
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils", "alloc"] }
-proptest = { version = "1", default-features = false, features = ["std"] }
-reputation = { path = "../reputation" }
-
-

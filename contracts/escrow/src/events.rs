@@ -59,3 +59,10 @@ pub fn contract_unpaused(env: &Env, admin: &Address) {
         (admin.clone(),),
     );
 }
+
+pub fn yield_deposited(env: &Env, protocol: &Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "yield_deposited"),),
+        (protocol.clone(), amount),
+    );
+}

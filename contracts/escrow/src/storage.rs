@@ -81,6 +81,7 @@ pub struct ProtocolConfig {
 pub enum DataKey {
     Escrow(EscrowId),
     Config,
+    ReputationContract,
 }
 
 const DEFAULT_ESCROW_ID: EscrowId = 0;
@@ -200,4 +201,12 @@ pub fn load_config(env: &Env) -> ProtocolConfig {
 
 pub fn has_config(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Config)
+}
+
+pub fn save_reputation_contract(env: &Env, addr: &Address) {
+    env.storage().instance().set(&DataKey::ReputationContract, addr);
+}
+
+pub fn load_reputation_contract(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::ReputationContract)
 }
