@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "contracts/escrow",
+    "contracts/factory",
     "clients/cli",
 ]
 resolver = "2"
