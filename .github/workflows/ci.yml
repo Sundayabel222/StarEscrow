@@ -18,5 +18,8 @@ jobs:
     - name: Cargo build
       run: cargo build --workspace
 
+    - name: Cargo clippy
+      run: cargo clippy --workspace -- -D warnings
+
     - name: Cargo test
       run: cargo test --workspace
