@@ -27,3 +27,32 @@ jobs:
 
       - name: Run unit + property tests
         run: cargo test -p escrow
+
+      - name: Run benchmarks
+        run: cargo test -p escrow bench -- --nocapture 2>&1 | tee bench-results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: bench-results.txt
+
+      - name: Build WASM
+        run: |
+          cargo install --locked stellar-cli --features opt 2>/dev/null || true
+          cargo build -p escrow --target wasm32-unknown-unknown --release
+
+      - name: Report WASM size
+        run: |
+          WASM=target/wasm32-unknown-unknown/release/escrow.wasm
+          if [ -f "$WASM" ]; then
+            SIZE=$(wc -c < "$WASM")
+            echo "WASM size: ${SIZE} bytes"
+            echo "wasm_size=${SIZE}" >> "$GITHUB_OUTPUT"
+            # Regression check: fail if WASM exceeds 100 KB
+            if [ "$SIZE" -gt 102400 ]; then
+              echo "::error::WASM size ${SIZE} bytes exceeds 100 KB limit"
+              exit 1
+            fi
+          fi
+        id: wasm_size
