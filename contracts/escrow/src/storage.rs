@@ -48,6 +48,14 @@ pub struct EscrowData {
     pub yield_protocol: Option<Address>,
     pub principal_deposited: i128,
     pub yield_recipient: YieldRecipient,
+    /// Recurring mode: interval in seconds between releases (0 = disabled).
+    pub interval: u64,
+    /// Total number of recurring releases allowed (0 = disabled).
+    pub recurrence_count: u32,
+    /// Number of releases already made.
+    pub releases_made: u32,
+    /// Timestamp of the last release (or creation time for first interval).
+    pub last_release_time: u64,
 }
 
 #[contracttype]
@@ -93,6 +101,7 @@ pub struct ProtocolConfig {
 pub enum DataKey {
     Escrow(EscrowId),
     Config,
+    ReputationContract,
 }
 
 const DEFAULT_ESCROW_ID: EscrowId = 0;
@@ -212,4 +221,12 @@ pub fn load_config(env: &Env) -> ProtocolConfig {
 
 pub fn has_config(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Config)
+}
+
+pub fn save_reputation_contract(env: &Env, addr: &Address) {
+    env.storage().instance().set(&DataKey::ReputationContract, addr);
+}
+
+pub fn load_reputation_contract(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::ReputationContract)
 }

@@ -2,6 +2,8 @@
 
 This document is the authoritative reference for the StarEscrow escrow protocol running on Stellar via Soroban smart contracts.
 
+See [GLOSSARY.md](GLOSSARY.md) for definitions of all domain and Soroban-specific terms used here.
+
 ---
 
 ## 1. Overview

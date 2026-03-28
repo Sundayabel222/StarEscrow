@@ -11,4 +11,8 @@ pub enum EscrowError {
     NotExpired = 6,
     Unauthorized = 7,
     Paused = 8,
+    TokenNotAllowed = 9,
+    IntervalNotElapsed = 10,
+    RecurrenceComplete = 11,
+    NotRecurring = 12,
 }
