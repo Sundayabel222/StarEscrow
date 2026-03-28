@@ -5,6 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::io::{self, Write};
 use chrono;
+use ureq;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -181,6 +182,13 @@ enum Commands {
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
     },
+
+    /// Fund an account on Testnet using Friendbot
+    Fund {
+        /// Stellar address to fund
+        #[arg(long)]
+        address: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -350,6 +358,31 @@ fn main() -> Result<()> {
                     let event_type = e["topic"][0].as_str().unwrap_or("unknown");
                     let timestamp = e["ledger_closed_at"].as_str().unwrap_or("unknown");
                     println!("  [{}] {} | {} | data={}", i + 1, timestamp, event_type, e["value"]);
+                }
+            }
+        }
+
+        Commands::Fund { address } => {
+            if cli.network_passphrase != "Test SDF Network ; September 2015" {
+                anyhow::bail!("Fund command is only available on Testnet.");
+            }
+
+            if !as_json {
+                println!("Requesting XLM from Friendbot for {}...", address);
+            }
+
+            let url = format!("https://friendbot.stellar.org?addr={}", address);
+            let resp = ureq::get(&url).call();
+
+            match resp {
+                Ok(_) => {
+                    output(as_json, json!({"status": "ok", "address": address}), &format!("Successfully funded {}.", address));
+                }
+                Err(ureq::Error::Status(code, _)) => {
+                    anyhow::bail!("Friendbot returned error code {}. The account might already be funded or the address is invalid.", code);
+                }
+                Err(e) => {
+                    anyhow::bail!("Failed to call Friendbot: {}", e);
                 }
             }
         }
