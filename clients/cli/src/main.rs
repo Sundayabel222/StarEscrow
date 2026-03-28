@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use std::io::{self, Write};
 use chrono;
 use ureq;
+use sha2::{Sha256, Digest};
+use std::fs;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -188,6 +190,16 @@ enum Commands {
         /// Stellar address to fund
         #[arg(long)]
         address: String,
+    },
+
+    /// Verify that the deployed contract matches a local WASM file
+    Verify {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Path to the local WASM file
+        #[arg(long)]
+        wasm_path: String,
     },
 }
 
@@ -386,6 +398,42 @@ fn main() -> Result<()> {
                 }
             }
         }
+
+        Commands::Verify { contract_id, wasm_path } => {
+            if !as_json {
+                println!("Verifying contract {} against {}...", contract_id, wasm_path);
+            }
+
+            // Fetch remote hash
+            let remote_hash = fetch_remote_wasm_hash(&cli.rpc_url, &cli.network_passphrase, &contract_id)?;
+
+            // Compute local hash
+            let local_wasm = fs::read(&wasm_path).with_context(|| format!("Failed to read local WASM file at {}", wasm_path))?;
+            let mut hasher = Sha256::new();
+            hasher.update(&local_wasm);
+            let local_hash = hex::encode(hasher.finalize());
+
+            let matches = remote_hash == local_hash;
+
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&json!({
+                    "contract_id": contract_id,
+                    "wasm_path": wasm_path,
+                    "remote_hash": remote_hash,
+                    "local_hash": local_hash,
+                    "matches": matches
+                }))?);
+            } else {
+                println!("Remote Hash: {}", remote_hash);
+                println!("Local Hash:  {}", local_hash);
+                if matches {
+                    println!("SUCCESS: Hashes match!");
+                } else {
+                    eprintln!("FAILURE: Hashes do not match!");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -455,6 +503,28 @@ fn fetch_events(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> R
     let raw = String::from_utf8_lossy(&out.stdout);
     let events: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
     Ok(events)
+}
+
+fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> Result<String> {
+    let out = std::process::Command::new("stellar")
+        .args([
+            "contract", "fetch",
+            "--id", contract_id,
+            "--rpc-url", rpc_url,
+            "--network-passphrase", network_passphrase,
+            "--output", "wasm",
+        ])
+        .output()
+        .context("Failed to fetch contract WASM from network")?;
+
+    if !out.status.success() {
+        anyhow::bail!("stellar contract fetch failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(&out.stdout);
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
 }
 
 fn query_contract(rpc_url: &str, network_passphrase: &str, contract_id: &str, function: &str) -> Result<String> {
