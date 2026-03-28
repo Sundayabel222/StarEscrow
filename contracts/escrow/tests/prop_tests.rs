@@ -4,7 +4,7 @@ use escrow::{EscrowContract, EscrowContractClient, EscrowStatus, YieldRecipient}
 use proptest::prelude::*;
 use soroban_sdk::{
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, String,
+    Address, Env, String, Vec,
 };
 
 fn setup(
@@ -98,7 +98,7 @@ proptest! {
         simple_create(&env, &contract, &payer, &freelancer, &token_addr, amount);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            contract.approve();
+            contract.approve(&payer);
         }));
         prop_assert!(result.is_err(), "approve before submit must panic");
     }

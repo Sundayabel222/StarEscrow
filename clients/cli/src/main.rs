@@ -1,6 +1,13 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
+use std::thread;
+use std::time::{Duration, Instant};
+use std::io::{self, Write};
+use chrono;
+use ureq;
+use sha2::{Sha256, Digest};
+use std::fs;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -157,6 +164,43 @@ enum Commands {
         #[arg(long)]
         payer: String,
     },
+
+    /// Poll contract status and notify of changes
+    Watch {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Polling interval in seconds
+        #[arg(long, default_value = "10")]
+        interval: u64,
+
+        /// Exit after N seconds
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+
+    /// Fetch and display event history for the contract
+    History {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+    },
+
+    /// Fund an account on Testnet using Friendbot
+    Fund {
+        /// Stellar address to fund
+        #[arg(long)]
+        address: String,
+    },
+
+    /// Verify that the deployed contract matches a local WASM file
+    Verify {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Path to the local WASM file
+        #[arg(long)]
+        wasm_path: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -268,6 +312,128 @@ fn main() -> Result<()> {
         Commands::List { contract_id, payer } => {
             list_escrows(&cli.rpc_url, &cli.network_passphrase, &contract_id, &payer, as_json)?;
         }
+
+        Commands::Watch { contract_id, interval, timeout } => {
+            let start = Instant::now();
+            let mut last_status = None;
+
+            if !as_json {
+                println!("Watching escrow {} (interval: {}s)...", contract_id, interval);
+            }
+
+            loop {
+                let current_raw = query_contract(&cli.rpc_url, &cli.network_passphrase, &contract_id, "get_status")?;
+                let current_status = current_raw.trim().to_string();
+
+                if let Some(ref last) = last_status {
+                    if *last != current_status {
+                        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                        output(
+                            as_json,
+                            json!({"status": "changed", "new_status": current_status, "timestamp": timestamp}),
+                            &format!("[{}] Status changed: {}", timestamp, current_status),
+                        );
+                        last_status = Some(current_status);
+                    }
+                } else {
+                    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    output(
+                        as_json,
+                        json!({"status": "initial", "current_status": current_status, "timestamp": timestamp}),
+                        &format!("[{}] Initial status: {}", timestamp, current_status),
+                    );
+                    last_status = Some(current_status);
+                }
+
+                if let Some(t) = timeout {
+                    if start.elapsed() >= Duration::from_secs(t) {
+                        if !as_json {
+                            println!("Timeout reached ({}s). Exiting.", t);
+                        }
+                        break;
+                    }
+                }
+
+                thread::sleep(Duration::from_secs(interval));
+            }
+        }
+
+        Commands::History { contract_id } => {
+            let events = fetch_events(&cli.rpc_url, &cli.network_passphrase, &contract_id)?;
+            if events.is_empty() {
+                output(as_json, json!({"events": []}), "No events found.");
+            } else if as_json {
+                println!("{}", serde_json::to_string_pretty(&json!({"events": events}))?);
+            } else {
+                println!("Event history for contract {}:", contract_id);
+                for (i, e) in events.iter().enumerate() {
+                    let event_type = e["topic"][0].as_str().unwrap_or("unknown");
+                    let timestamp = e["ledger_closed_at"].as_str().unwrap_or("unknown");
+                    println!("  [{}] {} | {} | data={}", i + 1, timestamp, event_type, e["value"]);
+                }
+            }
+        }
+
+        Commands::Fund { address } => {
+            if cli.network_passphrase != "Test SDF Network ; September 2015" {
+                anyhow::bail!("Fund command is only available on Testnet.");
+            }
+
+            if !as_json {
+                println!("Requesting XLM from Friendbot for {}...", address);
+            }
+
+            let url = format!("https://friendbot.stellar.org?addr={}", address);
+            let resp = ureq::get(&url).call();
+
+            match resp {
+                Ok(_) => {
+                    output(as_json, json!({"status": "ok", "address": address}), &format!("Successfully funded {}.", address));
+                }
+                Err(ureq::Error::Status(code, _)) => {
+                    anyhow::bail!("Friendbot returned error code {}. The account might already be funded or the address is invalid.", code);
+                }
+                Err(e) => {
+                    anyhow::bail!("Failed to call Friendbot: {}", e);
+                }
+            }
+        }
+
+        Commands::Verify { contract_id, wasm_path } => {
+            if !as_json {
+                println!("Verifying contract {} against {}...", contract_id, wasm_path);
+            }
+
+            // Fetch remote hash
+            let remote_hash = fetch_remote_wasm_hash(&cli.rpc_url, &cli.network_passphrase, &contract_id)?;
+
+            // Compute local hash
+            let local_wasm = fs::read(&wasm_path).with_context(|| format!("Failed to read local WASM file at {}", wasm_path))?;
+            let mut hasher = Sha256::new();
+            hasher.update(&local_wasm);
+            let local_hash = hex::encode(hasher.finalize());
+
+            let matches = remote_hash == local_hash;
+
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&json!({
+                    "contract_id": contract_id,
+                    "wasm_path": wasm_path,
+                    "remote_hash": remote_hash,
+                    "local_hash": local_hash,
+                    "matches": matches
+                }))?);
+            } else {
+                println!("Remote Hash: {}", remote_hash);
+                println!("Local Hash:  {}", local_hash);
+                if matches {
+                    println!("SUCCESS: Hashes match!");
+                } else {
+                    eprintln!("FAILURE: Hashes do not match!");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -284,19 +450,7 @@ fn output(as_json: bool, data: Value, human: &str) {
 
 /// Query `escrow_created` events for a given payer and display results.
 fn list_escrows(rpc_url: &str, network_passphrase: &str, contract_id: &str, payer: &str, as_json: bool) -> Result<()> {
-    let out = std::process::Command::new("stellar")
-        .args([
-            "contract", "events",
-            "--id", contract_id,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
-            "--output", "json",
-        ])
-        .output()
-        .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
-
-    let raw = String::from_utf8_lossy(&out.stdout);
-    let events: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
+    let events = fetch_events(rpc_url, network_passphrase, contract_id)?;
 
     let escrows: Vec<Value> = events
         .into_iter()
@@ -332,6 +486,45 @@ fn list_escrows(rpc_url: &str, network_passphrase: &str, contract_id: &str, paye
     }
 
     Ok(())
+}
+
+fn fetch_events(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> Result<Vec<Value>> {
+    let out = std::process::Command::new("stellar")
+        .args([
+            "contract", "events",
+            "--id", contract_id,
+            "--rpc-url", rpc_url,
+            "--network-passphrase", network_passphrase,
+            "--output", "json",
+        ])
+        .output()
+        .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
+
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let events: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(events)
+}
+
+fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> Result<String> {
+    let out = std::process::Command::new("stellar")
+        .args([
+            "contract", "fetch",
+            "--id", contract_id,
+            "--rpc-url", rpc_url,
+            "--network-passphrase", network_passphrase,
+            "--output", "wasm",
+        ])
+        .output()
+        .context("Failed to fetch contract WASM from network")?;
+
+    if !out.status.success() {
+        anyhow::bail!("stellar contract fetch failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(&out.stdout);
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
 }
 
 fn query_contract(rpc_url: &str, network_passphrase: &str, contract_id: &str, function: &str) -> Result<String> {

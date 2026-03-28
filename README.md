@@ -167,6 +167,7 @@ sequenceDiagram
 
 - [Protocol Specification](docs/PROTOCOL.md) — States, transitions, functions, events, and security model
 - [Deployment Guide](docs/DEPLOYMENT.md) — Build, deploy to testnet and mainnet, post-deployment checks
+- [Security & Threat Model](docs/SECURITY.md) — Trusted parties, attack vectors, mitigations, and out-of-scope threats
 
 ---
 

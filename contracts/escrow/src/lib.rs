@@ -2,6 +2,7 @@
 
 mod errors;
 mod events;
+mod reputation;
 mod storage;
 mod r#yield;
 
@@ -80,6 +81,18 @@ impl EscrowContract {
             return Err(EscrowError::InvalidAmount);
         }
 
+        // Validate threshold
+        let m = approvers.len() as u32;
+        let threshold = if approvers.is_empty() {
+            // Single-payer mode: payer is the sole approver
+            1u32
+        } else {
+            if required_approvals == 0 || required_approvals > m {
+                return Err(EscrowError::InvalidThreshold);
+            }
+            required_approvals
+        };
+
         let allowed = storage::read_allowed_tokens(&env);
         if !allowed.is_empty() && !allowed.contains(&token) {
             return Err(EscrowError::TokenNotAllowed);
@@ -157,10 +170,10 @@ impl EscrowContract {
             if fee > 0 {
                 client.transfer(&env.current_contract_address(), &config.fee_collector, &fee);
             }
-            (data.amount - fee, fee)
         } else {
             (data.amount, 0)
         };
+        let _ = fee_amount;
 
         client.transfer(&env.current_contract_address(), &data.freelancer, &freelancer_amount);
         events::payment_released(&env, &data.freelancer, freelancer_amount);
@@ -305,6 +318,22 @@ impl EscrowContract {
         if storage::has_config(env) && storage::load_config(env).paused {
             return Err(EscrowError::Paused);
         }
+        Ok(())
+    }
+
+    fn withdraw_funds(
+        env: &Env,
+        data: &mut EscrowData,
+        recipient: Address,
+    ) -> Result<(), EscrowError> {
+        let mut total = data.amount;
+        if let Some(ref protocol) = data.yield_protocol {
+            let yield_client = YieldProtocolClient::new(env, protocol);
+            let (principal, yield_accrued) = yield_client.withdraw(&data.principal_deposited);
+            total = principal + yield_accrued;
+        }
+        let client = token::Client::new(env, &data.token);
+        client.transfer(&env.current_contract_address(), &recipient, &total);
         Ok(())
     }
 }

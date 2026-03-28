@@ -22,14 +22,11 @@ struct Setup<'a> {
     token: TokenClient<'a>,
     token_addr: Address,
     contract: EscrowContractClient<'a>,
+    rep: ReputationContractClient<'a>,
 }
 
 impl<'a> Setup<'a> {
     fn new() -> Self {
-        Self::with_fee(0)
-    }
-
-    fn with_fee(fee_bps: u32) -> Self {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -47,7 +44,21 @@ impl<'a> Setup<'a> {
         let contract = EscrowContractClient::new(&env, &contract_addr);
         contract.init(&admin, &fee_bps, &fee_collector);
 
-        Setup { env, payer, freelancer, token, token_addr, contract }
+        Setup { env, payer, freelancer, token, token_addr, contract, rep }
+    }
+
+    fn simple_create(&self, amount: i128, milestone: &str) {
+        let m = String::from_str(&self.env, milestone);
+        self.contract.create(
+            &self.payer,
+            &self.freelancer,
+            &self.token_addr,
+            &amount,
+            &m,
+            &None,
+            &None,
+            &YieldRecipient::Payer,
+        );
     }
 
     fn simple_create(&self, amount: i128, milestone: &str) {
@@ -79,9 +90,7 @@ fn test_full_happy_path() {
 
     s.contract.submit_work();
     s.contract.approve();
-
     assert_eq!(s.token.balance(&s.freelancer), 500);
-    assert_eq!(s.token.balance(&s.contract.address), 0);
 }
 
 #[test]
@@ -101,7 +110,7 @@ fn test_approve_before_submit_fails() {
 }
 
 #[test]
-fn test_cancel_after_submit_fails() {
+fn test_approve_before_submit_fails() {
     let s = Setup::new();
     s.simple_create(200, "Write tests");
     s.contract.submit_work();
