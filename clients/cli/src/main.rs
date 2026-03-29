@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+mod keypair;
+mod wasm_hash;
+mod xdr;
+
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
 /// Prerequisites:
@@ -193,6 +197,9 @@ enum Commands {
     Status {
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
+        /// Token address to include balance in output
+        #[arg(long)]
+        token: Option<String>,
     },
     /// List all escrows created by a payer address
     List {
@@ -215,6 +222,20 @@ enum Commands {
         /// Write the resulting contract ID to a local .env file
         #[arg(long, default_value = ".env")]
         env_file: std::path::PathBuf,
+    },
+
+    /// Verify a local WASM file's SHA-256 hash against the on-chain deployed hash
+    Verify {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Path to the local WASM file to verify
+        #[arg(long)]
+        wasm: std::path::PathBuf,
+
+        /// Only print the local hash without fetching on-chain (offline mode)
+        #[arg(long)]
+        local_only: bool,
     },
 }
 
@@ -435,6 +456,15 @@ fn main() -> Result<()> {
         },
         Commands::Status { contract_id } => {
             let raw = query_contract(&rpc_url, &network_passphrase, &contract_id, "get_escrow")?;
+            let balance: Option<String> = if let Some(ref tok) = token {
+                let bal_raw = query_contract_with_args(
+                    &rpc_url, &network_passphrase, &contract_id,
+                    "get_balance", &["--token", tok],
+                )?;
+                Some(bal_raw.trim().to_string())
+            } else {
+                None
+            };
             if as_json {
                 let parsed: Value = serde_json::from_str(raw.trim())
                     .unwrap_or(Value::String(raw.trim().to_string()));
@@ -444,6 +474,9 @@ fn main() -> Result<()> {
                 );
             } else {
                 println!("{}", raw.trim());
+                if let Some(bal) = balance {
+                    println!("balance: {bal}");
+                }
             }
         },
         Commands::List { contract_id, payer } => {
@@ -629,11 +662,8 @@ fn run_setup_wizard() -> Result<()> {
             .with_prompt("Secret key (S...)")
             .interact_text()?
     } else {
-        let out = std::process::Command::new("stellar")
-            .args(["keys", "generate", "--no-fund", "setup-key"])
-            .output()
-            .context("stellar CLI not found")?;
-        let secret = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let kp = keypair::Keypair::generate();
+        let secret = kp.secret_key_str();
         println!("Generated secret key: {secret}");
         secret
     };
@@ -716,7 +746,7 @@ fn run_estimate_fee(
 ) -> Result<()> {
     let function = match operation {
         "create" => "create",
-        "submit-work" => "submit_work",
+        "submit-work" => "submit",
         "approve" => "approve",
         "cancel" => "cancel",
         "expire" => "expire",
@@ -932,13 +962,7 @@ fn query_contract(
     function: &str,
 ) -> Result<String> {
     let out = std::process::Command::new("stellar")
-        .args([
-            "contract", "invoke",
-            "--id", contract_id,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
-            "--", function,
-        ])
+        .args(&args)
         .output()
         .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -978,9 +1002,5 @@ fn invoke_stellar_cli(
 }
 
 fn stellar_address_from_secret(secret: &str) -> Result<String> {
-    let out = std::process::Command::new("stellar")
-        .args(["keys", "address", secret])
-        .output()
-        .context("stellar CLI not found")?;
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    keypair::public_address_from_secret(secret)
 }

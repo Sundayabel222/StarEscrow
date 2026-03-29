@@ -20,4 +20,7 @@ pub enum EscrowError {
     MilestoneNotSubmitted = 15,
     MilestoneAlreadyApproved = 16,
     InvalidDeadline = 17,
+    DisputeNotAllowed = 18,
+    NotDisputed = 19,
+    InvalidReleaseRecipient = 20,
 }
