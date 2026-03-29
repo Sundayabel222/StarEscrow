@@ -316,6 +316,10 @@ impl EscrowContract {
         Ok(())
     }
 
+    pub fn get_balance(env: Env, token: Address) -> i128 {
+        token::Client::new(&env, &token).balance(&env.current_contract_address())
+    }
+
     pub fn get_status(env: Env) -> EscrowStatus {
         storage::load_escrow(&env).status
     }
