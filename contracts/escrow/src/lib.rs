@@ -69,6 +69,7 @@ impl EscrowContract {
 
     /// Create escrow. Set `interval > 0` and `recurrence_count > 0` for recurring mode.
     /// In recurring mode `amount` is the per-release payment; total locked = amount * recurrence_count.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         env: Env,
         payer: Address,
