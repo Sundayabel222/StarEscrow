@@ -656,3 +656,82 @@ fn test_cancel_unauthorized() {
     s.env.mock_all_auths();
     assert_eq!(s.contract.get_escrow().status, EscrowStatus::Active);
 }
+
+// ── NFT ownership transfer tests ─────────────────────────────────────────────
+
+#[test]
+fn test_nft_owner_is_payer_after_create() {
+    let s = Setup::new();
+    s.simple_create(100, "NFT owner check");
+    assert_eq!(s.contract.nft_owner(), s.payer);
+}
+
+#[test]
+fn test_nft_transfer_updates_payer() {
+    let s = Setup::new();
+    s.simple_create(100, "NFT transfer");
+
+    let new_owner = Address::generate(&s.env);
+    s.contract.nft_transfer(&new_owner);
+
+    // NFT owner reflects the transfer.
+    assert_eq!(s.contract.nft_owner(), new_owner);
+    // EscrowData.payer is updated atomically.
+    assert_eq!(s.contract.get_escrow().payer, new_owner);
+}
+
+#[test]
+fn test_nft_transfer_new_owner_can_approve() {
+    let s = Setup::new();
+    s.simple_create(100, "NFT approve");
+
+    let new_owner = Address::generate(&s.env);
+    s.contract.nft_transfer(&new_owner);
+
+    // Freelancer submits work.
+    s.contract.submit_work(&0u32);
+
+    // New owner (not original payer) can approve.
+    s.contract.approve(&0u32);
+    assert_eq!(s.contract.get_status(), EscrowStatus::Completed);
+}
+
+#[test]
+fn test_nft_transfer_new_owner_can_cancel() {
+    let s = Setup::new();
+    s.simple_create(100, "NFT cancel");
+
+    let new_owner = Address::generate(&s.env);
+    s.contract.nft_transfer(&new_owner);
+
+    s.contract.cancel();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Cancelled);
+}
+
+#[test]
+fn test_nft_transfer_paused_fails() {
+    let s = Setup::new();
+    s.simple_create(100, "NFT paused");
+    s.contract.pause();
+
+    let new_owner = Address::generate(&s.env);
+    let err = s.contract.try_nft_transfer(&new_owner).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::Paused);
+}
+
+#[test]
+fn test_nft_transfer_chain() {
+    // Transfer ownership twice; final owner should be the last recipient.
+    let s = Setup::new();
+    s.simple_create(100, "NFT chain");
+
+    let owner_b = Address::generate(&s.env);
+    let owner_c = Address::generate(&s.env);
+
+    s.contract.nft_transfer(&owner_b);
+    assert_eq!(s.contract.nft_owner(), owner_b);
+
+    s.contract.nft_transfer(&owner_c);
+    assert_eq!(s.contract.nft_owner(), owner_c);
+    assert_eq!(s.contract.get_escrow().payer, owner_c);
+}
