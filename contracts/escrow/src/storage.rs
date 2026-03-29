@@ -34,22 +34,6 @@ pub enum YieldRecipient {
     Freelancer,
 }
 
-#[contracttype]
-#[derive(Clone, PartialEq, Debug)]
-pub enum MilestoneStatus {
-    Pending,
-    Submitted,
-    Approved,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct Milestone {
-    pub description: String,
-    pub amount: i128,
-    pub status: MilestoneStatus,
-}
-
 /// The core escrow data stored on-chain.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -60,11 +44,8 @@ pub struct EscrowData {
     pub freelancer: Address,
     /// SEP-41 token contract used for all transfers.
     pub token: Address,
-    /// Sum of all milestone amounts; total funds locked in the contract.
-    pub total_amount: i128,
-    /// Ordered list of work milestones, each with its own amount and status.
-    pub milestones: Vec<Milestone>,
-    /// Current lifecycle state of the escrow.
+    pub amount: i128,
+    pub milestone: String,
     pub status: EscrowStatus,
     /// Optional Unix timestamp (seconds) after which the payer may call `expire()`.
     pub deadline: Option<u64>,

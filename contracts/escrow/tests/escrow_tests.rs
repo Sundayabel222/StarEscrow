@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient, storage::{Milestone, MilestoneStatus}};
+use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
@@ -59,7 +59,7 @@ impl<'a> Setup<'a> {
 
         let contract_addr = env.register_contract(None, EscrowContract);
         let contract = EscrowContractClient::new(&env, &contract_addr);
-        contract.init(&admin, &0u32, &fee_collector);  // fee_bps = 0 for default tests
+        contract.init(&admin, &fee_bps, &fee_collector);
 
         Setup { env, payer, freelancer, token, token_addr, contract }
     }
@@ -91,8 +91,8 @@ fn test_full_happy_path() {
     assert_eq!(s.token.balance(&s.payer), 9500);
     assert_eq!(s.token.balance(&s.contract.address), 500);
 
-    s.contract.submit(0);
-    s.contract.approve(0);
+    s.contract.submit_work();
+    s.contract.approve();
     assert_eq!(s.token.balance(&s.freelancer), 500);
 }
 
@@ -108,8 +108,8 @@ fn test_cancel_refunds_payer() {
 fn test_approve_before_submit_fails() {
     let s = Setup::new();
     s.simple_create(100, "Approve before submit");
-    let err = s.contract.try_approve(&0u32).unwrap_err().unwrap();
-    assert_eq!(err, EscrowError::MilestoneNotSubmitted);
+    let err = s.contract.try_approve().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::WorkNotSubmitted);
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn test_unpause_restores_operations() {
 
 #[test]
 fn test_fee_deducted_on_approve() {
-    let s = Setup::new_with_fee(100); // 1%
+    let s = Setup::with_fee(100); // 1%
     s.simple_create(500, "Fee test");
     s.contract.submit();
     s.contract.approve();
@@ -429,7 +429,78 @@ fn test_recurring_cancel_refunds_remaining() {
     assert_eq!(s.token.balance(&s.freelancer), 100);
 }
 
-// ── TTL extension ─────────────────────────────────────────────────────────────
+// ── get_balance ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_get_balance_lifecycle() {
+    let s = Setup::new();
+
+    // Before create: contract holds nothing
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+
+    s.simple_create(500, "Balance lifecycle");
+    // After create: funds locked
+    assert_eq!(s.contract.get_balance(&s.token_addr), 500);
+
+    s.contract.submit_work();
+    // After submit_work: still locked
+    assert_eq!(s.contract.get_balance(&s.token_addr), 500);
+
+    s.contract.approve();
+    // After approve: released to freelancer
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+}
+
+#[test]
+fn test_get_balance_after_cancel() {
+    let s = Setup::new();
+    s.simple_create(300, "Cancel balance");
+    assert_eq!(s.contract.get_balance(&s.token_addr), 300);
+    s.contract.cancel();
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+}
+
+// ── update_milestone ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_update_milestone_success() {
+    let s = Setup::new();
+    s.simple_create(100, "Original milestone");
+    let new_desc = String::from_str(&s.env, "Updated milestone");
+    s.contract.update_milestone(&new_desc);
+    assert_eq!(s.contract.get_escrow().milestone, new_desc);
+}
+
+#[test]
+fn test_update_milestone_unauthorized() {
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+    let s = Setup::new();
+    s.simple_create(100, "Original milestone");
+    let attacker = Address::generate(&s.env);
+    let new_desc = String::from_str(&s.env, "Hacked milestone");
+    s.env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &s.contract.address,
+            fn_name: "update_milestone",
+            args: (new_desc.clone(),).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = s.contract.try_update_milestone(&new_desc);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_milestone_not_active_fails() {
+    let s = Setup::new();
+    s.simple_create(100, "Milestone");
+    s.contract.submit_work();
+    s.contract.approve();
+    let new_desc = String::from_str(&s.env, "Too late");
+    let err = s.contract.try_update_milestone(&new_desc).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotActive);
+}
 
 #[test]
 fn test_ttl_extended_after_create() {

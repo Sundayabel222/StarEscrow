@@ -149,6 +149,9 @@ enum Commands {
     Status {
         #[arg(long, env = "ESCROW_CONTRACT_ID")]
         contract_id: String,
+        /// Token address to include balance in output
+        #[arg(long)]
+        token: Option<String>,
     },
     /// List all escrows created by a payer address
     List {
@@ -256,13 +259,28 @@ fn main() -> Result<()> {
             invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &payer_secret, "expire", &[])?;
             output(as_json, json!({"status":"ok","action":"expire"}), "Escrow expired. Funds returned to payer.");
         }
-        Commands::Status { contract_id } => {
+        Commands::Status { contract_id, token } => {
             let raw = query_contract(&rpc_url, &network_passphrase, &contract_id, "get_escrow")?;
+            let balance: Option<String> = if let Some(ref tok) = token {
+                let bal_raw = query_contract_with_args(
+                    &rpc_url, &network_passphrase, &contract_id,
+                    "get_balance", &["--token", tok],
+                )?;
+                Some(bal_raw.trim().to_string())
+            } else {
+                None
+            };
             if as_json {
-                let parsed: Value = serde_json::from_str(raw.trim()).unwrap_or(Value::String(raw.trim().to_string()));
+                let mut parsed: Value = serde_json::from_str(raw.trim()).unwrap_or(Value::String(raw.trim().to_string()));
+                if let Some(bal) = balance {
+                    parsed["balance"] = Value::String(bal);
+                }
                 println!("{}", serde_json::to_string_pretty(&json!({"status":"ok","escrow":parsed}))?);
             } else {
                 println!("{}", raw.trim());
+                if let Some(bal) = balance {
+                    println!("balance: {bal}");
+                }
             }
         }
         Commands::List { contract_id, payer } => {
@@ -675,14 +693,20 @@ fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: 
 }
 
 fn query_contract(rpc_url: &str, network_passphrase: &str, contract_id: &str, function: &str) -> Result<String> {
+    query_contract_with_args(rpc_url, network_passphrase, contract_id, function, &[])
+}
+
+fn query_contract_with_args(rpc_url: &str, network_passphrase: &str, contract_id: &str, function: &str, extra_args: &[&str]) -> Result<String> {
+    let mut args = vec![
+        "contract", "invoke",
+        "--id", contract_id,
+        "--rpc-url", rpc_url,
+        "--network-passphrase", network_passphrase,
+        "--", function,
+    ];
+    args.extend_from_slice(extra_args);
     let out = std::process::Command::new("stellar")
-        .args([
-            "contract", "invoke",
-            "--id", contract_id,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
-            "--", function,
-        ])
+        .args(&args)
         .output()
         .context("stellar CLI not found — install from https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli")?;
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
