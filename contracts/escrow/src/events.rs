@@ -53,6 +53,13 @@ pub fn payer_transferred(env: &Env, old_payer: &Address, new_payer: &Address) {
     );
 }
 
+pub fn partial_released(env: &Env, freelancer: &Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "partial_released"),),
+        (freelancer.clone(), amount),
+    );
+}
+
 pub fn milestone_updated(env: &Env, old: &String, new: &String) {
     env.events().publish(
         (Symbol::new(env, "milestone_updated"),),

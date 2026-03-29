@@ -474,6 +474,36 @@ fn test_update_milestone_not_active_fails() {
     assert_eq!(err, EscrowError::NotActive);
 }
 
+// ── partial_release ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_partial_release_success() {
+    let s = Setup::new();
+    s.simple_create(500, "Partial release");
+    s.contract.partial_release(&s.token_addr, &200);
+    assert_eq!(s.token.balance(&s.freelancer), 200);
+    assert_eq!(s.token.balance(&s.contract.address), 300);
+    // escrow still active
+    assert_eq!(s.contract.get_status(), EscrowStatus::Active);
+}
+
+#[test]
+fn test_partial_release_over_locked_fails() {
+    let s = Setup::new();
+    s.simple_create(500, "Over release");
+    let err = s.contract.try_partial_release(&s.token_addr, &600).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InsufficientFunds);
+}
+
+#[test]
+fn test_partial_release_not_active_fails() {
+    let s = Setup::new();
+    s.simple_create(100, "Not active");
+    s.contract.cancel();
+    let err = s.contract.try_partial_release(&s.token_addr, &50).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotActive);
+}
+
 #[test]
 fn test_ttl_extended_after_create() {
     let s = Setup::new();

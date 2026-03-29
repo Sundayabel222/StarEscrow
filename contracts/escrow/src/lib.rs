@@ -341,6 +341,27 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Payer releases a partial amount to the freelancer while escrow remains Active.
+    pub fn partial_release(env: Env, token: Address, amount: i128) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        let data = storage::load_escrow(&env);
+        if data.status != EscrowStatus::Active {
+            return Err(EscrowError::NotActive);
+        }
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        data.payer.require_auth();
+        let locked = token::Client::new(&env, &token).balance(&env.current_contract_address());
+        if amount > locked {
+            return Err(EscrowError::InsufficientFunds);
+        }
+        token::Client::new(&env, &token).transfer(&env.current_contract_address(), &data.freelancer, &amount);
+        events::partial_released(&env, &data.freelancer, amount);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
     /// Payer updates the milestone description while escrow is Active.
     pub fn update_milestone(env: Env, new_milestone: String) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
