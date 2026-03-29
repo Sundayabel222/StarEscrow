@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient, storage::{Milestone, MilestoneStatus}};
+use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
@@ -59,7 +59,7 @@ impl<'a> Setup<'a> {
 
         let contract_addr = env.register_contract(None, EscrowContract);
         let contract = EscrowContractClient::new(&env, &contract_addr);
-        contract.init(&admin, &0u32, &fee_collector);  // fee_bps = 0 for default tests
+        contract.init(&admin, &fee_bps, &fee_collector);
 
         Setup { env, payer, freelancer, token, token_addr, contract }
     }
@@ -91,8 +91,8 @@ fn test_full_happy_path() {
     assert_eq!(s.token.balance(&s.payer), 9500);
     assert_eq!(s.token.balance(&s.contract.address), 500);
 
-    s.contract.submit_work(0);
-    s.contract.approve(0);
+    s.contract.submit_work();
+    s.contract.approve();
     assert_eq!(s.token.balance(&s.freelancer), 500);
 }
 
@@ -108,8 +108,8 @@ fn test_cancel_refunds_payer() {
 fn test_approve_before_submit_fails() {
     let s = Setup::new();
     s.simple_create(100, "Approve before submit");
-    let err = s.contract.try_approve(&0u32).unwrap_err().unwrap();
-    assert_eq!(err, EscrowError::MilestoneNotSubmitted);
+    let err = s.contract.try_approve().unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::WorkNotSubmitted);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn test_unpause_restores_operations() {
 
 #[test]
 fn test_fee_deducted_on_approve() {
-    let s = Setup::new_with_fee(100); // 1%
+    let s = Setup::with_fee(100); // 1%
     s.simple_create(500, "Fee test");
     s.contract.submit_work();
     s.contract.approve();

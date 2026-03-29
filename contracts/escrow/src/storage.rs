@@ -34,22 +34,6 @@ pub enum YieldRecipient {
     Freelancer,
 }
 
-#[contracttype]
-#[derive(Clone, PartialEq, Debug)]
-pub enum MilestoneStatus {
-    Pending,
-    Submitted,
-    Approved,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct Milestone {
-    pub description: String,
-    pub amount: i128,
-    pub status: MilestoneStatus,
-}
-
 /// The core escrow data stored on-chain.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -57,8 +41,8 @@ pub struct EscrowData {
     pub payer: Address,
     pub freelancer: Address,
     pub token: Address,
-    pub total_amount: i128,
-    pub milestones: Vec<Milestone>,
+    pub amount: i128,
+    pub milestone: String,
     pub status: EscrowStatus,
     pub deadline: Option<u64>,
     pub yield_protocol: Option<Address>,

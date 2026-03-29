@@ -4,37 +4,12 @@ pub fn escrow_created(
     env: &Env,
     payer: &Address,
     freelancer: &Address,
-    total_amount: &i128,
-    milestones: &Vec<storage::Milestone>,
+    amount: i128,
+    milestone: &String,
 ) {
     env.events().publish(
         (Symbol::new(env, "escrow_created"),),
-        (payer.clone(), freelancer.clone(), total_amount.clone(), milestones.clone()),
-    );
-}
-
-pub fn milestone_submitted(
-    env: &Env,
-    freelancer: &Address,
-    idx: u32,
-    description: &String,
-) {
-    env.events().publish(
-        (Symbol::new(env, "milestone_submitted"),),
-        (freelancer.clone(), idx, description.clone()),
-    );
-}
-
-pub fn milestone_approved(
-    env: &Env,
-    freelancer: &Address,
-    idx: u32,
-    description: &String,
-    amount: i128,
-) {
-    env.events().publish(
-        (Symbol::new(env, "milestone_approved"),),
-        (freelancer.clone(), idx, description.clone(), amount),
+        (payer.clone(), freelancer.clone(), amount, milestone.clone()),
     );
 }
 
