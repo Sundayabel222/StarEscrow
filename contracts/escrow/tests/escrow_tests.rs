@@ -398,7 +398,36 @@ fn test_recurring_cancel_refunds_remaining() {
     assert_eq!(s.token.balance(&s.freelancer), 100);
 }
 
-// ── TTL extension ─────────────────────────────────────────────────────────────
+// ── get_balance ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_get_balance_lifecycle() {
+    let s = Setup::new();
+
+    // Before create: contract holds nothing
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+
+    s.simple_create(500, "Balance lifecycle");
+    // After create: funds locked
+    assert_eq!(s.contract.get_balance(&s.token_addr), 500);
+
+    s.contract.submit_work();
+    // After submit_work: still locked
+    assert_eq!(s.contract.get_balance(&s.token_addr), 500);
+
+    s.contract.approve();
+    // After approve: released to freelancer
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+}
+
+#[test]
+fn test_get_balance_after_cancel() {
+    let s = Setup::new();
+    s.simple_create(300, "Cancel balance");
+    assert_eq!(s.contract.get_balance(&s.token_addr), 300);
+    s.contract.cancel();
+    assert_eq!(s.contract.get_balance(&s.token_addr), 0);
+}
 
 #[test]
 fn test_ttl_extended_after_create() {
