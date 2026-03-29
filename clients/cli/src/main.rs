@@ -3,6 +3,9 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use sha2::{Sha256, Digest};
 
+mod keypair;
+mod wasm_hash;
+
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
 /// Prerequisites:
@@ -169,6 +172,20 @@ enum Commands {
         #[arg(long, default_value = ".env")]
         env_file: std::path::PathBuf,
     },
+
+    /// Verify a local WASM file's SHA-256 hash against the on-chain deployed hash
+    Verify {
+        #[arg(long, env = "ESCROW_CONTRACT_ID")]
+        contract_id: String,
+
+        /// Path to the local WASM file to verify
+        #[arg(long)]
+        wasm: std::path::PathBuf,
+
+        /// Only print the local hash without fetching on-chain (offline mode)
+        #[arg(long)]
+        local_only: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -254,6 +271,25 @@ fn main() -> Result<()> {
 
         Commands::Deploy { wasm, deployer_secret, env_file } => {
             deploy_contract(&rpc_url, &network_passphrase, wasm.as_deref(), &deployer_secret, &env_file, as_json)?;
+        }
+
+        Commands::Verify { contract_id, wasm, local_only } => {
+            let local_hash = wasm_hash::hash_wasm_file(&wasm)?;
+            if local_only {
+                output(as_json,
+                    json!({"status":"ok","local_hash":local_hash}),
+                    &format!("Local WASM hash: {local_hash}"));
+            } else {
+                let onchain_hash = wasm_hash::fetch_onchain_hash(&rpc_url, &network_passphrase, &contract_id)?;
+                let matched = local_hash.eq_ignore_ascii_case(&onchain_hash);
+                let status = if matched { "match" } else { "mismatch" };
+                output(as_json,
+                    json!({"status": status, "local_hash": local_hash, "onchain_hash": onchain_hash, "match": matched}),
+                    &format!("Local : {local_hash}\nChain : {onchain_hash}\nResult: {}", if matched { "✓ MATCH" } else { "✗ MISMATCH" }));
+                if !matched {
+                    anyhow::bail!("WASM hash mismatch — local file does not match on-chain contract");
+                }
+            }
         }
     }
 
@@ -403,11 +439,8 @@ fn run_setup_wizard() -> Result<()> {
     let secret_key = if use_existing {
         Input::<String>::new().with_prompt("Secret key (S...)").interact_text()?
     } else {
-        let out = std::process::Command::new("stellar")
-            .args(["keys", "generate", "--no-fund", "setup-key"])
-            .output()
-            .context("stellar CLI not found")?;
-        let secret = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let kp = keypair::Keypair::generate();
+        let secret = kp.secret_key_str();
         println!("Generated secret key: {secret}");
         secret
     };
@@ -679,9 +712,5 @@ fn invoke_stellar_cli(
 }
 
 fn stellar_address_from_secret(secret: &str) -> Result<String> {
-    let out = std::process::Command::new("stellar")
-        .args(["keys", "address", secret])
-        .output()
-        .context("stellar CLI not found")?;
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    keypair::public_address_from_secret(secret)
 }
