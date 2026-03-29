@@ -12,7 +12,7 @@ pub use storage::{EscrowData, EscrowStatus, ProtocolConfig, YieldRecipient};
 
 use crate::r#yield::YieldProtocolClient;
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Vec};
 
 #[contract]
 pub struct EscrowContract;
@@ -616,4 +616,75 @@ impl EscrowContract {
         }
         Ok(())
     }
+
+    // ── Governance integration ────────────────────────────────────────────────
+
+    /// Admin registers the governance contract address.
+    /// After this, `gov_apply` can only be called by that contract.
+    pub fn set_governance(env: Env, governance: Address) -> Result<(), EscrowError> {
+        let config = storage::load_config(&env);
+        config.admin.require_auth();
+        storage::save_governance_contract(&env, &governance);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
+    /// Called exclusively by the governance contract to apply approved parameter changes.
+    ///
+    /// Supported keys:
+    /// - `"fee_bps"`        → parse value as u32
+    /// - `"fee_collector"`  → parse value as Address
+    /// - `"add_token"`      → add token address to allowlist
+    /// - `"remove_token"`   → remove token address from allowlist
+    pub fn gov_apply(env: Env, changes: Vec<GovParamChange>) -> Result<(), EscrowError> {
+        // Only the registered governance contract may call this.
+        let gov = storage::load_governance_contract(&env).ok_or(EscrowError::Unauthorized)?;
+        gov.require_auth();
+
+        let mut config = storage::load_config(&env);
+        for change in changes.iter() {
+            let key = change.key.clone();
+            let value = change.value.clone();
+            if key == String::from_str(&env, "fee_bps") {
+                let bps = parse_u32_from_soroban_string(&value).ok_or(EscrowError::InvalidAmount)?;
+                config.fee_bps = bps;
+            } else if key == String::from_str(&env, "fee_collector") {
+                config.fee_collector = Address::from_string(&value);
+            } else if key == String::from_str(&env, "add_token") {
+                storage::add_to_allowlist(&env, Address::from_string(&value));
+            } else if key == String::from_str(&env, "remove_token") {
+                storage::remove_from_allowlist(&env, Address::from_string(&value));
+            }
+            // Unknown keys are silently ignored (forward-compatible).
+        }
+        storage::save_config(&env, &config);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+}
+
+/// Parameter change type used by the governance contract.
+#[contracttype]
+#[derive(Clone)]
+pub struct GovParamChange {
+    pub key: String,
+    pub value: String,
+}
+
+/// Parse a decimal ASCII string stored in a Soroban `String` into a `u32`.
+/// Returns `None` if the string contains non-digit characters or overflows.
+fn parse_u32_from_soroban_string(s: &String) -> Option<u32> {
+    let len = s.len();
+    if len == 0 {
+        return None;
+    }
+    let mut result: u32 = 0;
+    for i in 0..len {
+        let b = s.get(i)?;
+        if b < b'0' || b > b'9' {
+            return None;
+        }
+        result = result.checked_mul(10)?.checked_add((b - b'0') as u32)?;
+    }
+    Some(result)
 }
