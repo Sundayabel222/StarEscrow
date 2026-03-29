@@ -2,12 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
-
-mod keypair;
-mod wasm_hash;
-mod xdr;
-mod deadline;
+use sha2::{Sha256, Digest};
+use stellar_strkey::{ed25519, Strkey};
+use ed25519_dalek::SigningKey;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -1016,5 +1013,79 @@ fn invoke_stellar_cli(
 }
 
 fn stellar_address_from_secret(secret: &str) -> Result<String> {
-    keypair::public_address_from_secret(secret)
+    // Decode the secret key (S...)
+    let secret_key = Strkey::from_string(secret)
+        .map_err(|e| anyhow::anyhow!("Invalid secret key format: {}", e))?;
+    
+    // Extract the Ed25519 secret key bytes
+    let secret_bytes = match secret_key {
+        Strkey::PrivateKeyEd25519(ed25519::PrivateKey(bytes)) => bytes,
+        _ => anyhow::bail!("Secret key must be an Ed25519 private key (S...)"),
+    };
+    
+    // Derive the public key from the secret key
+    // In Ed25519, the public key is derived from the last 32 bytes of the expanded secret
+    let signing_key = SigningKey::from_bytes(&secret_bytes);
+    let verifying_key = signing_key.verifying_key();
+    let public_bytes = verifying_key.to_bytes();
+    
+    // Encode the public key as a Stellar address (G...)
+    let public_key = ed25519::PublicKey(public_bytes);
+    let address = Strkey::PublicKeyEd25519(public_key).to_string();
+    
+    Ok(address)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stellar_address_from_secret_valid() {
+        // Test with a known valid secret key
+        let secret = "SBZVMB3SEPB2ENHQVHFBWBQOZXRTJVVQJLDBC3NJVDOQBCAJ3CIQAAAA";
+        let result = stellar_address_from_secret(secret);
+        assert!(result.is_ok(), "Should successfully derive address from valid secret");
+        
+        let address = result.unwrap();
+        assert!(address.starts_with("G"), "Address should start with G");
+        assert_eq!(address.len(), 56, "Address should be 56 characters long");
+    }
+
+    #[test]
+    fn test_stellar_address_from_secret_invalid_format() {
+        // Test with invalid format (not a valid strkey)
+        let secret = "INVALID_SECRET_KEY";
+        let result = stellar_address_from_secret(secret);
+        assert!(result.is_err(), "Should fail with invalid secret key format");
+        
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("Invalid secret key format"), 
+                "Error message should mention invalid format");
+    }
+
+    #[test]
+    fn test_stellar_address_from_secret_wrong_key_type() {
+        // Test with a public key instead of secret key (starts with G instead of S)
+        let public_key = "GCZFMH32MF5EAWETZTKF3ZV5SEVJPI53UEMDNSW55WBR75GMZJU4U573";
+        let result = stellar_address_from_secret(public_key);
+        assert!(result.is_err(), "Should fail when given a public key instead of secret");
+    }
+
+    #[test]
+    fn test_stellar_address_from_secret_empty() {
+        // Test with empty string
+        let secret = "";
+        let result = stellar_address_from_secret(secret);
+        assert!(result.is_err(), "Should fail with empty secret key");
+    }
+
+    #[test]
+    fn test_stellar_address_from_secret_consistency() {
+        // Test that the same secret always produces the same address
+        let secret = "SBZVMB3SEPB2ENHQVHFBWBQOZXRTJVVQJLDBC3NJVDOQBCAJ3CIQAAAA";
+        let address1 = stellar_address_from_secret(secret).unwrap();
+        let address2 = stellar_address_from_secret(secret).unwrap();
+        assert_eq!(address1, address2, "Same secret should always produce same address");
+    }
 }

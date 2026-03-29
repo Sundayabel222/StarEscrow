@@ -274,7 +274,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "toml",
+ "stellar-strkey 0.0.9",
 ]
 
 [[package]]
@@ -1654,13 +1654,13 @@ dependencies = [
 
 [[package]]
 name = "stellar-strkey"
-version = "0.0.16"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "084afcb0d458c3d5d5baa2d294b18f881e62cc258ef539d8fdf68be7dbe45520"
+checksum = "5e3aa3ed00e70082cb43febc1c2afa5056b9bb3e348bbb43d0cd0aa88a611144"
 dependencies = [
  "crate-git-revision",
  "data-encoding",
- "heapless",
+ "thiserror",
 ]
 
 [[package]]
