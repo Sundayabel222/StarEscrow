@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -12,6 +13,11 @@ use sha2::{Sha256, Digest};
 #[derive(Parser)]
 #[command(name = "star-escrow", version, about)]
 struct Cli {
+    /// Path to a TOML config file. Defaults to ~/.star-escrow/config.toml.
+    /// Config values are overridden by explicit CLI flags.
+    #[arg(long, value_name = "FILE")]
+    config: Option<std::path::PathBuf>,
+
     /// Network shorthand: testnet, mainnet, or futurenet.
     /// Sets --rpc-url and --network-passphrase automatically.
     /// Cannot be combined with --rpc-url or --network-passphrase.
@@ -34,6 +40,47 @@ struct Cli {
     command: Commands,
 }
 
+/// TOML config file format:
+///
+/// ```toml
+/// rpc_url = "https://soroban-testnet.stellar.org"
+/// network_passphrase = "Test SDF Network ; September 2015"
+/// contract_id = "C..."
+/// ```
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ConfigFile {
+    rpc_url: Option<String>,
+    network_passphrase: Option<String>,
+    contract_id: Option<String>,
+}
+
+impl ConfigFile {
+    fn load(path: &std::path::Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading config file {}", path.display()))?;
+        toml::from_str(&text).with_context(|| format!("parsing config file {}", path.display()))
+    }
+
+    fn load_default_or_explicit(explicit: Option<&std::path::Path>) -> Result<Self> {
+        let path = match explicit {
+            Some(p) => p.to_path_buf(),
+            None => {
+                let home = std::env::var("HOME").unwrap_or_default();
+                std::path::PathBuf::from(home)
+                    .join(".star-escrow")
+                    .join("config.toml")
+            },
+        };
+        if path.exists() {
+            Self::load(&path)
+        } else if explicit.is_some() {
+            anyhow::bail!("config file not found: {}", path.display());
+        } else {
+            Ok(Self::default())
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone)]
 enum Network {
     Testnet,
@@ -44,16 +91,16 @@ enum Network {
 impl Network {
     fn rpc_url(&self) -> &'static str {
         match self {
-            Network::Testnet   => "https://soroban-testnet.stellar.org",
-            Network::Mainnet   => "https://soroban-mainnet.stellar.org",
+            Network::Testnet => "https://soroban-testnet.stellar.org",
+            Network::Mainnet => "https://soroban-mainnet.stellar.org",
             Network::Futurenet => "https://rpc-futurenet.stellar.org",
         }
     }
 
     fn passphrase(&self) -> &'static str {
         match self {
-            Network::Testnet   => "Test SDF Network ; September 2015",
-            Network::Mainnet   => "Public Global Stellar Network ; September 2015",
+            Network::Testnet => "Test SDF Network ; September 2015",
+            Network::Mainnet => "Public Global Stellar Network ; September 2015",
             Network::Futurenet => "Test SDF Future Network ; October 2022",
         }
     }
@@ -175,86 +222,248 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let as_json = cli.json;
 
+    let cfg = ConfigFile::load_default_or_explicit(cli.config.as_deref())?;
+
     let (rpc_url, network_passphrase) = match &cli.network {
         Some(net) => (net.rpc_url().to_string(), net.passphrase().to_string()),
         None => (
-            cli.rpc_url.unwrap_or_else(|| "https://soroban-testnet.stellar.org".to_string()),
-            cli.network_passphrase.unwrap_or_else(|| "Test SDF Network ; September 2015".to_string()),
+            cli.rpc_url
+                .or(cfg.rpc_url)
+                .unwrap_or_else(|| "https://soroban-testnet.stellar.org".to_string()),
+            cli.network_passphrase
+                .or(cfg.network_passphrase)
+                .unwrap_or_else(|| "Test SDF Network ; September 2015".to_string()),
         ),
     };
 
     match cli.command {
-        Commands::Init { contract_id, admin_secret, fee_bps, fee_collector } => {
+        Commands::Init {
+            contract_id,
+            admin_secret,
+            fee_bps,
+            fee_collector,
+        } => {
             let admin_addr = stellar_address_from_secret(&admin_secret)?;
             invoke_stellar_cli(
-                &rpc_url, &network_passphrase, &contract_id, &admin_secret,
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &admin_secret,
                 "init",
-                &["--admin", &admin_addr, "--fee-bps", &fee_bps.to_string(), "--fee-collector", &fee_collector],
+                &[
+                    "--admin",
+                    &admin_addr,
+                    "--fee-bps",
+                    &fee_bps.to_string(),
+                    "--fee-collector",
+                    &fee_collector,
+                ],
             )?;
-            output(as_json, json!({"status": "ok", "action": "init"}), "Protocol initialised.");
-        }
-        Commands::Pause { contract_id, admin_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &admin_secret, "pause", &[])?;
-            output(as_json, json!({"status": "ok", "action": "pause"}), "Contract paused.");
-        }
-        Commands::Unpause { contract_id, admin_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &admin_secret, "unpause", &[])?;
-            output(as_json, json!({"status": "ok", "action": "unpause"}), "Contract unpaused.");
-        }
-        Commands::Create { contract_id, payer_secret, freelancer, token, amount, milestone, deadline } => {
-            let payer_addr = stellar_address_from_secret(&payer_secret)?;
-            let deadline_str = deadline.map(|d| d.to_string()).unwrap_or_else(|| "null".into());
+            output(
+                as_json,
+                json!({"status": "ok", "action": "init"}),
+                "Protocol initialised.",
+            );
+        },
+        Commands::Pause {
+            contract_id,
+            admin_secret,
+        } => {
             invoke_stellar_cli(
-                &rpc_url, &network_passphrase, &contract_id, &payer_secret, "create",
-                &["--payer", &payer_addr, "--freelancer", &freelancer, "--token", &token,
-                  "--amount", &amount.to_string(), "--milestone", &milestone, "--deadline", &deadline_str],
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &admin_secret,
+                "pause",
+                &[],
             )?;
-            output(as_json,
+            output(
+                as_json,
+                json!({"status": "ok", "action": "pause"}),
+                "Contract paused.",
+            );
+        },
+        Commands::Unpause {
+            contract_id,
+            admin_secret,
+        } => {
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &admin_secret,
+                "unpause",
+                &[],
+            )?;
+            output(
+                as_json,
+                json!({"status": "ok", "action": "unpause"}),
+                "Contract unpaused.",
+            );
+        },
+        Commands::Create {
+            contract_id,
+            payer_secret,
+            freelancer,
+            token,
+            amount,
+            milestone,
+            deadline,
+        } => {
+            let payer_addr = stellar_address_from_secret(&payer_secret)?;
+            let deadline_str = deadline
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "null".into());
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &payer_secret,
+                "create",
+                &[
+                    "--payer",
+                    &payer_addr,
+                    "--freelancer",
+                    &freelancer,
+                    "--token",
+                    &token,
+                    "--amount",
+                    &amount.to_string(),
+                    "--milestone",
+                    &milestone,
+                    "--deadline",
+                    &deadline_str,
+                ],
+            )?;
+            output(
+                as_json,
                 json!({"status":"ok","action":"create","contract_id":contract_id,"payer":payer_addr,
                        "freelancer":freelancer,"amount":amount,"milestone":milestone,"deadline":deadline}),
-                "Escrow created. Funds locked.");
-        }
-        Commands::SubmitWork { contract_id, freelancer_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &freelancer_secret, "submit_work", &[])?;
-            output(as_json, json!({"status":"ok","action":"submit_work"}), "Work submitted. Waiting for payer approval.");
-        }
-        Commands::TransferFreelancer { contract_id, freelancer_secret, new_freelancer } => {
+                "Escrow created. Funds locked.",
+            );
+        },
+        Commands::SubmitWork {
+            contract_id,
+            freelancer_secret,
+        } => {
             invoke_stellar_cli(
-                &rpc_url, &network_passphrase, &contract_id, &freelancer_secret,
-                "transfer_freelancer", &["--new-freelancer", &new_freelancer],
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &freelancer_secret,
+                "submit_work",
+                &[],
             )?;
-            output(as_json,
+            output(
+                as_json,
+                json!({"status":"ok","action":"submit_work"}),
+                "Work submitted. Waiting for payer approval.",
+            );
+        },
+        Commands::TransferFreelancer {
+            contract_id,
+            freelancer_secret,
+            new_freelancer,
+        } => {
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &freelancer_secret,
+                "transfer_freelancer",
+                &["--new-freelancer", &new_freelancer],
+            )?;
+            output(
+                as_json,
                 json!({"status":"ok","action":"transfer_freelancer","new_freelancer":new_freelancer}),
-                &format!("Freelancer role transferred to {new_freelancer}."));
-        }
-        Commands::Approve { contract_id, payer_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &payer_secret, "approve", &[])?;
-            output(as_json, json!({"status":"ok","action":"approve"}), "Payment released to freelancer.");
-        }
-        Commands::Cancel { contract_id, payer_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &payer_secret, "cancel", &[])?;
-            output(as_json, json!({"status":"ok","action":"cancel"}), "Escrow cancelled. Funds refunded to payer.");
-        }
-        Commands::Expire { contract_id, payer_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &payer_secret, "expire", &[])?;
-            output(as_json, json!({"status":"ok","action":"expire"}), "Escrow expired. Funds returned to payer.");
-        }
+                &format!("Freelancer role transferred to {new_freelancer}."),
+            );
+        },
+        Commands::Approve {
+            contract_id,
+            payer_secret,
+        } => {
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &payer_secret,
+                "approve",
+                &[],
+            )?;
+            output(
+                as_json,
+                json!({"status":"ok","action":"approve"}),
+                "Payment released to freelancer.",
+            );
+        },
+        Commands::Cancel {
+            contract_id,
+            payer_secret,
+        } => {
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &payer_secret,
+                "cancel",
+                &[],
+            )?;
+            output(
+                as_json,
+                json!({"status":"ok","action":"cancel"}),
+                "Escrow cancelled. Funds refunded to payer.",
+            );
+        },
+        Commands::Expire {
+            contract_id,
+            payer_secret,
+        } => {
+            invoke_stellar_cli(
+                &rpc_url,
+                &network_passphrase,
+                &contract_id,
+                &payer_secret,
+                "expire",
+                &[],
+            )?;
+            output(
+                as_json,
+                json!({"status":"ok","action":"expire"}),
+                "Escrow expired. Funds returned to payer.",
+            );
+        },
         Commands::Status { contract_id } => {
             let raw = query_contract(&rpc_url, &network_passphrase, &contract_id, "get_escrow")?;
             if as_json {
-                let parsed: Value = serde_json::from_str(raw.trim()).unwrap_or(Value::String(raw.trim().to_string()));
-                println!("{}", serde_json::to_string_pretty(&json!({"status":"ok","escrow":parsed}))?);
+                let parsed: Value = serde_json::from_str(raw.trim())
+                    .unwrap_or(Value::String(raw.trim().to_string()));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status":"ok","escrow":parsed}))?
+                );
             } else {
                 println!("{}", raw.trim());
             }
-        }
+        },
         Commands::List { contract_id, payer } => {
             list_escrows(&rpc_url, &network_passphrase, &contract_id, &payer, as_json)?;
-        }
+        },
 
-        Commands::Deploy { wasm, deployer_secret, env_file } => {
-            deploy_contract(&rpc_url, &network_passphrase, wasm.as_deref(), &deployer_secret, &env_file, as_json)?;
-        }
+        Commands::Deploy {
+            wasm,
+            deployer_secret,
+            env_file,
+        } => {
+            deploy_contract(
+                &rpc_url,
+                &network_passphrase,
+                wasm.as_deref(),
+                &deployer_secret,
+                &env_file,
+                as_json,
+            )?;
+        },
     }
 
     Ok(())
@@ -282,7 +491,7 @@ fn deploy_contract(
                 anyhow::bail!("`stellar contract build` failed");
             }
             std::path::PathBuf::from("target/wasm32-unknown-unknown/release/escrow.wasm")
-        }
+        },
     };
 
     if !wasm_path.exists() {
@@ -292,11 +501,16 @@ fn deploy_contract(
     // Step 2: deploy.
     let out = std::process::Command::new("stellar")
         .args([
-            "contract", "deploy",
-            "--wasm", wasm_path.to_str().context("invalid wasm path")?,
-            "--source", deployer_secret,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
+            "contract",
+            "deploy",
+            "--wasm",
+            wasm_path.to_str().context("invalid wasm path")?,
+            "--source",
+            deployer_secret,
+            "--rpc-url",
+            rpc_url,
+            "--network-passphrase",
+            network_passphrase,
         ])
         .output()
         .context("stellar CLI not found")?;
@@ -317,7 +531,10 @@ fn deploy_contract(
     output(
         as_json,
         serde_json::json!({"status": "ok", "contract_id": contract_id, "env_file": env_file.display().to_string()}),
-        &format!("Deployed! Contract ID: {contract_id}\nWritten to {}", env_file.display()),
+        &format!(
+            "Deployed! Contract ID: {contract_id}\nWritten to {}",
+            env_file.display()
+        ),
     );
     Ok(())
 }
@@ -348,13 +565,18 @@ fn upsert_env_var(path: &std::path::Path, key: &str, value: &str) -> Result<()> 
         .collect::<Vec<_>>()
         .join("\n");
 
-    let mut content = if found { updated } else { format!("{existing}\n{new_line}") };
+    let mut content = if found {
+        updated
+    } else {
+        format!("{existing}\n{new_line}")
+    };
     if !content.ends_with('\n') {
         content.push('\n');
     }
 
     let mut file = std::fs::File::create(path).context("writing .env file")?;
-    file.write_all(content.as_bytes()).context("writing .env file")?;
+    file.write_all(content.as_bytes())
+        .context("writing .env file")?;
     Ok(())
 }
 
@@ -387,9 +609,11 @@ fn run_setup_wizard() -> Result<()> {
         ),
         _ => {
             let rpc: String = Input::new().with_prompt("RPC URL").interact_text()?;
-            let pass: String = Input::new().with_prompt("Network passphrase").interact_text()?;
+            let pass: String = Input::new()
+                .with_prompt("Network passphrase")
+                .interact_text()?;
             (rpc, pass)
-        }
+        },
     };
 
     // 2. Keypair: generate or provide
@@ -401,7 +625,9 @@ fn run_setup_wizard() -> Result<()> {
         == 1;
 
     let secret_key = if use_existing {
-        Input::<String>::new().with_prompt("Secret key (S...)").interact_text()?
+        Input::<String>::new()
+            .with_prompt("Secret key (S...)")
+            .interact_text()?
     } else {
         let out = std::process::Command::new("stellar")
             .args(["keys", "generate", "--no-fund", "setup-key"])
@@ -419,8 +645,14 @@ fn run_setup_wizard() -> Result<()> {
     if net_idx == 0 {
         println!("Funding account via Friendbot…");
         let status = std::process::Command::new("curl")
-            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}",
-                   &format!("https://friendbot.stellar.org?addr={address}")])
+            .args([
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                &format!("https://friendbot.stellar.org?addr={address}"),
+            ])
             .status()
             .context("curl not found")?;
         if status.success() {
@@ -434,18 +666,28 @@ fn run_setup_wizard() -> Result<()> {
     println!("Deploying StarEscrow contract…");
     let deploy_out = std::process::Command::new("stellar")
         .args([
-            "contract", "deploy",
-            "--wasm", "target/wasm32-unknown-unknown/release/escrow.wasm",
-            "--source", &secret_key,
-            "--rpc-url", &rpc_url,
-            "--network-passphrase", &network_passphrase,
+            "contract",
+            "deploy",
+            "--wasm",
+            "target/wasm32-unknown-unknown/release/escrow.wasm",
+            "--source",
+            &secret_key,
+            "--rpc-url",
+            &rpc_url,
+            "--network-passphrase",
+            &network_passphrase,
         ])
         .output()
         .context("stellar CLI not found")?;
 
-    let contract_id = String::from_utf8_lossy(&deploy_out.stdout).trim().to_string();
+    let contract_id = String::from_utf8_lossy(&deploy_out.stdout)
+        .trim()
+        .to_string();
     if contract_id.is_empty() {
-        anyhow::bail!("Contract deployment failed:\n{}", String::from_utf8_lossy(&deploy_out.stderr));
+        anyhow::bail!(
+            "Contract deployment failed:\n{}",
+            String::from_utf8_lossy(&deploy_out.stderr)
+        );
     }
     println!("Contract deployed: {contract_id}");
 
@@ -485,13 +727,19 @@ fn run_estimate_fee(
 
     let out = std::process::Command::new("stellar")
         .args([
-            "contract", "invoke",
-            "--id", contract_id,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
-            "--source", source_secret,
+            "contract",
+            "invoke",
+            "--id",
+            contract_id,
+            "--rpc-url",
+            rpc_url,
+            "--network-passphrase",
+            network_passphrase,
+            "--source",
+            source_secret,
             "--sim-only",
-            "--", function,
+            "--",
+            function,
         ])
         .output()
         .context("stellar CLI not found")?;
@@ -502,19 +750,26 @@ fn run_estimate_fee(
 
     // Parse fee from simulation JSON output; fall back to grepping for a number near "fee"
     let fee_stroops: u64 = if let Ok(v) = serde_json::from_str::<Value>(stdout.trim()) {
-        v["fee"].as_u64()
+        v["fee"]
+            .as_u64()
             .or_else(|| v["min_resource_fee"].as_u64())
             .unwrap_or(0)
     } else {
-        combined.lines().find_map(|l| {
-            let l = l.to_lowercase();
-            if l.contains("fee") {
-                l.split_whitespace()
-                    .find_map(|w| w.trim_matches(|c: char| !c.is_ascii_digit()).parse::<u64>().ok())
-            } else {
-                None
-            }
-        }).unwrap_or(0)
+        combined
+            .lines()
+            .find_map(|l| {
+                let l = l.to_lowercase();
+                if l.contains("fee") {
+                    l.split_whitespace().find_map(|w| {
+                        w.trim_matches(|c: char| !c.is_ascii_digit())
+                            .parse::<u64>()
+                            .ok()
+                    })
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0)
     };
 
     let fee_xlm = fee_stroops as f64 / 10_000_000.0;
@@ -528,15 +783,20 @@ fn run_estimate_fee(
 // ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
-fn run_export(rpc_url: &str, network_passphrase: &str, contract_id: &str, out_path: &str) -> Result<()> {
+fn run_export(
+    rpc_url: &str,
+    network_passphrase: &str,
+    contract_id: &str,
+    out_path: &str,
+) -> Result<()> {
     let raw = query_contract(rpc_url, network_passphrase, contract_id, "get_escrow")?;
 
     if raw.trim().is_empty() {
         anyhow::bail!("No escrow data found for contract {contract_id}");
     }
 
-    let escrow: Value = serde_json::from_str(raw.trim())
-        .unwrap_or(Value::String(raw.trim().to_string()));
+    let escrow: Value =
+        serde_json::from_str(raw.trim()).unwrap_or(Value::String(raw.trim().to_string()));
 
     let doc = json!({
         "contract_id": contract_id,
@@ -564,7 +824,13 @@ fn output(as_json: bool, data: Value, human: &str) {
     }
 }
 
-fn list_escrows(rpc_url: &str, network_passphrase: &str, contract_id: &str, payer: &str, as_json: bool) -> Result<()> {
+fn list_escrows(
+    rpc_url: &str,
+    network_passphrase: &str,
+    contract_id: &str,
+    payer: &str,
+    as_json: bool,
+) -> Result<()> {
     let events = fetch_events(rpc_url, network_passphrase, contract_id)?;
 
     let escrows: Vec<Value> = events
@@ -573,23 +839,29 @@ fn list_escrows(rpc_url: &str, network_passphrase: &str, contract_id: &str, paye
             e["topic"][0].as_str().unwrap_or("") == "escrow_created"
                 && e["value"][0].as_str().unwrap_or("") == payer
         })
-        .map(|e| json!({
-            "contract_id": contract_id,
-            "payer": e["value"][0],
-            "freelancer": e["value"][1],
-            "amount": e["value"][2],
-            "milestone": e["value"][3],
-        }))
+        .map(|e| {
+            json!({
+                "contract_id": contract_id,
+                "payer": e["value"][0],
+                "freelancer": e["value"][1],
+                "amount": e["value"][2],
+                "milestone": e["value"][3],
+            })
+        })
         .collect();
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({"escrows": escrows}))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"escrows": escrows}))?
+        );
     } else if escrows.is_empty() {
         println!("No escrows found for payer {payer}");
     } else {
         println!("Escrows for payer {payer}:");
         for (i, e) in escrows.iter().enumerate() {
-            println!("  [{}] contract={} milestone={} amount={} freelancer={}",
+            println!(
+                "  [{}] contract={} milestone={} amount={} freelancer={}",
                 i + 1,
                 e["contract_id"].as_str().unwrap_or("-"),
                 e["milestone"].as_str().unwrap_or("-"),
@@ -619,20 +891,32 @@ fn fetch_events(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> R
 }
 
 #[allow(dead_code)]
-fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> Result<String> {
+fn fetch_remote_wasm_hash(
+    rpc_url: &str,
+    network_passphrase: &str,
+    contract_id: &str,
+) -> Result<String> {
     let out = std::process::Command::new("stellar")
         .args([
-            "contract", "fetch",
-            "--id", contract_id,
-            "--rpc-url", rpc_url,
-            "--network-passphrase", network_passphrase,
-            "--output", "wasm",
+            "contract",
+            "fetch",
+            "--id",
+            contract_id,
+            "--rpc-url",
+            rpc_url,
+            "--network-passphrase",
+            network_passphrase,
+            "--output",
+            "wasm",
         ])
         .output()
         .context("Failed to fetch contract WASM from network")?;
 
     if !out.status.success() {
-        anyhow::bail!("stellar contract fetch failed: {}", String::from_utf8_lossy(&out.stderr));
+        anyhow::bail!(
+            "stellar contract fetch failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     let mut hasher = Sha256::new();
@@ -641,7 +925,12 @@ fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: 
     Ok(hex::encode(result))
 }
 
-fn query_contract(rpc_url: &str, network_passphrase: &str, contract_id: &str, function: &str) -> Result<String> {
+fn query_contract(
+    rpc_url: &str,
+    network_passphrase: &str,
+    contract_id: &str,
+    function: &str,
+) -> Result<String> {
     let out = std::process::Command::new("stellar")
         .args([
             "contract", "invoke",
@@ -656,16 +945,26 @@ fn query_contract(rpc_url: &str, network_passphrase: &str, contract_id: &str, fu
 }
 
 fn invoke_stellar_cli(
-    rpc_url: &str, network_passphrase: &str, contract_id: &str,
-    secret: &str, function: &str, extra_args: &[&str],
+    rpc_url: &str,
+    network_passphrase: &str,
+    contract_id: &str,
+    secret: &str,
+    function: &str,
+    extra_args: &[&str],
 ) -> Result<()> {
     let mut args = vec![
-        "contract", "invoke",
-        "--id", contract_id,
-        "--rpc-url", rpc_url,
-        "--network-passphrase", network_passphrase,
-        "--source", secret,
-        "--", function,
+        "contract",
+        "invoke",
+        "--id",
+        contract_id,
+        "--rpc-url",
+        rpc_url,
+        "--network-passphrase",
+        network_passphrase,
+        "--source",
+        secret,
+        "--",
+        function,
     ];
     args.extend_from_slice(extra_args);
     let status = std::process::Command::new("stellar")
