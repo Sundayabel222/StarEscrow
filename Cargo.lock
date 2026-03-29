@@ -272,6 +272,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "stellar-strkey 0.0.16",
+ "tempfile",
 ]
 
 [[package]]
