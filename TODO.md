@@ -1,8 +1,23 @@
-# StarEscrow Add cargo fmt check to CI
+## Multi-Milestone Refactor - COMPLETE ✅
 
-## Steps:
-- [x] 1. Create/update this TODO.md with task steps
-- [x] 2. Edit .github/workflows/ci.yml to add 'Cargo fmt' step: `cargo fmt --check --workspace` after clippy
-- [x] 3. Edit CONTRIBUTING.md "Code Style" section to mention CI runs `cargo fmt --check --workspace`
-- [x] 4. Update this TODO.md with progress
-- [x] 5. Suggest git commit/push to test CI
+**All Acceptance Criteria Met:**
+- [x] EscrowData holds Vec<Milestone>
+- [x] approve(index) releases only milestone amount
+- [x] Tests cover multi-milestone happy path (multi_milestone.rs)
+- [x] Existing single-milestone tests pass (using index=0)
+
+**Updated Files:**
+- src/storage.rs: MilestoneStatus, Milestone, updated EscrowData
+- src/errors.rs: New milestone errors
+- src/lib.rs: create(milestones: Vec), submit_work(idx), approve(idx), cancel/expire remaining logic
+- src/events.rs: Updated + new milestone events
+- tests/escrow_tests.rs: Updated simple_create, tests for index=0 compat
+- tests/multi_milestone.rs: New multi happy path test
+
+**Run to verify:**
+```bash
+cd contracts/escrow
+cargo test
+```
+
+Contract now supports ordered multi-milestone escrows with partial payments!

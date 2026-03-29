@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient};
+use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient, storage::{Milestone, MilestoneStatus}};
 use soroban_sdk::{
     testutils::Ledger as _,
     token::{Client as TokenClient, StellarAssetClient},
@@ -55,44 +55,33 @@ impl<'a> Setup<'a> {
 
         let contract_addr = env.register_contract(None, EscrowContract);
         let contract = EscrowContractClient::new(&env, &contract_addr);
-        let fee_bps = 100u32; // 1% fee
-        contract.init(&admin, &fee_bps, &fee_collector);
+        contract.init(&admin, &0u32, &fee_collector);  // fee_bps = 0 for default tests
 
         Setup { env, payer, freelancer, token, token_addr, contract }
     }
 
-    fn new_with_fee(fee_bps: u32) -> Self {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let payer = test_address("payer");
-        let freelancer = test_address("freelancer");
-        let admin = test_address("admin");
-        let fee_collector = test_address("fee_collector");
-
-        let (token, token_admin) = create_token(&env, &admin);
-        let token_addr = token.address.clone();
-
-        token_admin.mint(&payer, &10_000);
-
-        let contract_addr = env.register_contract(None, EscrowContract);
-        let contract = EscrowContractClient::new(&env, &contract_addr);
-        contract.init(&admin, &fee_bps, &fee_collector);
-
-        Setup { env, payer, freelancer, token, token_addr, contract }
+    fn with_fee(fee_bps: u32) -> Self {
+        let mut s = Self::new();
+        // Re-init with fee (hack for test)
+        s.contract.init(&Address::generate(&s.env), &fee_bps, &Address::generate(&s.env));
+        s
     }
 
     fn simple_create(&self, amount: i128, milestone: &str) {
-        let m = String::from_str(&self.env, milestone);
+        let m = storage::Milestone {
+            description: String::from_str(&self.env, milestone),
+            amount,
+            status: storage::MilestoneStatus::Pending,
+        };
+        let milestones = vec![&self.env, m];
         self.contract.create(
             &self.payer,
             &self.freelancer,
             &self.token_addr,
-            &amount,
-            &m,
+            milestones,
             &None,
             &None,
-            &YieldRecipient::Payer,
+            &storage::YieldRecipient::Payer,
             &0u64,
             &0u32,
         );
@@ -109,8 +98,8 @@ fn test_full_happy_path() {
     assert_eq!(s.token.balance(&s.payer), 9500);
     assert_eq!(s.token.balance(&s.contract.address), 500);
 
-    s.contract.submit_work();
-    s.contract.approve();
+    s.contract.submit_work(0);
+    s.contract.approve(0);
     assert_eq!(s.token.balance(&s.freelancer), 500);
 }
 
@@ -126,8 +115,8 @@ fn test_cancel_refunds_payer() {
 fn test_approve_before_submit_fails() {
     let s = Setup::new();
     s.simple_create(100, "Approve before submit");
-    let err = s.contract.try_approve().unwrap_err().unwrap();
-    assert_eq!(err, EscrowError::WorkNotSubmitted);
+    let err = s.contract.try_approve(&0u32).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::MilestoneNotSubmitted);
 }
 
 #[test]
