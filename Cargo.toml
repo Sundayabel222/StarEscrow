@@ -4,6 +4,10 @@ members = [
     "contracts/factory",
     "clients/cli",
 ]
+# The fuzz crate is excluded from the default workspace build because it
+# requires a nightly toolchain and the libfuzzer-sys dependency.  It is
+# built explicitly in CI via `cargo +nightly fuzz run`.
+exclude = ["contracts/escrow/fuzz"]
 resolver = "2"
 
 [profile.release]

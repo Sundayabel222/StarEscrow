@@ -29,14 +29,14 @@ fn test_multi_milestone_happy_path() {
     );
 
     // Submit milestone 0
-    s.contract.submit_work(0);
+    s.contract.submit(0);
     // Approve milestone 0
     s.contract.approve(0);
     assert_eq!(s.token.balance(&s.freelancer), 300);
     assert_eq!(s.token.balance(&s.contract.address), 200);
 
     // Submit milestone 1
-    s.contract.submit_work(1);
+    s.contract.submit(1);
     // Approve milestone 1
     s.contract.approve(1);
     assert_eq!(s.token.balance(&s.freelancer), 500);

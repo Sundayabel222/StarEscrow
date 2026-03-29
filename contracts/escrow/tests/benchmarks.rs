@@ -81,19 +81,19 @@ fn bench_create() {
 }
 
 #[test]
-fn bench_submit_work() {
+fn bench_submit() {
     let s = BenchSetup::new();
     s.simple_create("bench milestone");
     s.env.budget().reset_default();
-    s.contract.submit_work();
-    print_budget("submit_work", &s.env.budget());
+    s.contract.submit();
+    print_budget("submit", &s.env.budget());
 }
 
 #[test]
 fn bench_approve() {
     let s = BenchSetup::new();
     s.simple_create("bench milestone");
-    s.contract.submit_work();
+    s.contract.submit();
     s.env.budget().reset_default();
     s.contract.approve();
     print_budget("approve", &s.env.budget());
