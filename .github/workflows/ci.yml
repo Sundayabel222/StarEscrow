@@ -26,3 +26,47 @@ jobs:
 
     - name: Cargo test
       run: cargo test --workspace
+
+  fuzz:
+    runs-on: ubuntu-latest
+    # Run fuzz job on push to main and on PRs; failures are non-blocking
+    # (continue-on-error) so a new crash doesn't break the whole pipeline
+    # until it is triaged and fixed.
+    continue-on-error: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: dtolnay/rust-toolchain@nightly
+
+    - name: Install cargo-fuzz
+      run: cargo install cargo-fuzz
+
+    - name: Fuzz fuzz_create (30 s)
+      working-directory: contracts/escrow
+      run: |
+        cargo fuzz run fuzz_create \
+          fuzz/corpus/fuzz_create \
+          -- -max_total_time=30 -max_len=4096
+
+    - name: Fuzz fuzz_approve (30 s)
+      working-directory: contracts/escrow
+      run: |
+        cargo fuzz run fuzz_approve \
+          fuzz/corpus/fuzz_approve \
+          -- -max_total_time=30 -max_len=4096
+
+    - name: Fuzz fuzz_cancel (30 s)
+      working-directory: contracts/escrow
+      run: |
+        cargo fuzz run fuzz_cancel \
+          fuzz/corpus/fuzz_cancel \
+          -- -max_total_time=30 -max_len=4096
+
+    - name: Upload crash artifacts
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-crashes
+        path: |
+          contracts/escrow/fuzz/artifacts/

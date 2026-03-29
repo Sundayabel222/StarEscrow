@@ -25,6 +25,7 @@ struct BenchSetup<'a> {
     env: Env,
     payer: Address,
     freelancer: Address,
+    arbitrator: Address,
     token: TokenClient<'a>,
     token_addr: Address,
     contract: EscrowContractClient<'a>,
@@ -36,6 +37,7 @@ impl<'a> BenchSetup<'a> {
         env.mock_all_auths();
         let payer = Address::generate(&env);
         let freelancer = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
         let admin = Address::generate(&env);
         let fee_collector = Address::generate(&env);
         let (token, token_admin) = create_token(&env, &admin);
@@ -44,22 +46,26 @@ impl<'a> BenchSetup<'a> {
         let contract_addr = env.register_contract(None, EscrowContract);
         let contract = EscrowContractClient::new(&env, &contract_addr);
         contract.init(&admin, &0u32, &fee_collector);
-        BenchSetup { env, payer, freelancer, token, token_addr, contract }
+        BenchSetup { env, payer, freelancer, arbitrator, token, token_addr, contract }
     }
 
     fn simple_create(&self, milestone: &str) {
         let m = String::from_str(&self.env, milestone);
+        let config = escrow::storage::EscrowConfig {
+            deadline: None,
+            yield_protocol: None,
+            yield_recipient: YieldRecipient::Payer,
+            interval: 0u64,
+            recurrence_count: 0u32,
+        };
         self.contract.create(
             &self.payer,
             &self.freelancer,
+            &self.arbitrator,
             &self.token_addr,
             &1000,
             &m,
-            &None,
-            &None,
-            &YieldRecipient::Payer,
-            &0u64,
-            &0u32,
+            &config,
         );
     }
 }
@@ -81,11 +87,11 @@ fn bench_create() {
 }
 
 #[test]
-fn bench_submit_work() {
+fn bench_submit() {
     let s = BenchSetup::new();
     s.simple_create("bench milestone");
     s.env.budget().reset_default();
-    s.contract.submit_work();
+    s.contract.submit_work(&0u32);
     print_budget("submit_work", &s.env.budget());
 }
 
@@ -93,9 +99,9 @@ fn bench_submit_work() {
 fn bench_approve() {
     let s = BenchSetup::new();
     s.simple_create("bench milestone");
-    s.contract.submit_work();
+    s.contract.submit_work(&0u32);
     s.env.budget().reset_default();
-    s.contract.approve();
+    s.contract.approve(&0u32);
     print_budget("approve", &s.env.budget());
 }
 
@@ -113,17 +119,21 @@ fn bench_expire() {
     let s = BenchSetup::new();
     let milestone = String::from_str(&s.env, "bench milestone");
     s.env.ledger().with_mut(|l| l.timestamp = 100);
+    let config = escrow::storage::EscrowConfig {
+        deadline: Some(500u64),
+        yield_protocol: None,
+        yield_recipient: YieldRecipient::Payer,
+        interval: 0u64,
+        recurrence_count: 0u32,
+    };
     s.contract.create(
         &s.payer,
         &s.freelancer,
+        &s.arbitrator,
         &s.token_addr,
         &1000,
         &milestone,
-        &Some(500u64),
-        &None,
-        &YieldRecipient::Payer,
-        &0u64,
-        &0u32,
+        &config,
     );
     s.env.ledger().with_mut(|l| l.timestamp = 1000);
     s.env.budget().reset_default();
