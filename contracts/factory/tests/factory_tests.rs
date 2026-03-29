@@ -86,7 +86,7 @@ fn test_factory_happy_path() {
     let s = Setup::new();
     let id = s.create(300, "Deliver feature");
 
-    s.factory.submit_work(&id);
+    s.factory.submit(&id);
     s.factory.approve(&id);
 
     assert_eq!(s.token.balance(&s.freelancer), 300);
@@ -124,7 +124,7 @@ fn test_factory_approve_before_submit_fails() {
 fn test_factory_cancel_after_submit_fails() {
     let s = Setup::new();
     let id = s.create(100, "Cancel after submit");
-    s.factory.submit_work(&id);
+    s.factory.submit(&id);
     let err = s.factory.try_cancel(&id).unwrap_err().unwrap();
     assert_eq!(err, FactoryError::NotActive);
 }

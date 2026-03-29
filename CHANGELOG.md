@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pull request template with comprehensive checklist
 - CLI installation documentation in README
 - CHANGELOG.md following Keep a Changelog format
+- SECURITY.md with vulnerability disclosure policy
 
 ### Changed
 - Enhanced README with detailed CLI build and installation instructions
+- Renamed `submit_work` → `submit` across contract, factory, CLI, and tests for API brevity
 
 ### Deprecated
 - N/A

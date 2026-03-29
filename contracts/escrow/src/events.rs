@@ -1,4 +1,5 @@
-use soroban_sdk::{Address, Env, String, Symbol};
+use crate::storage;
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 pub fn escrow_created(
     env: &Env,
@@ -99,5 +100,19 @@ pub fn recurring_released(env: &Env, freelancer: &Address, amount: i128, release
     env.events().publish(
         (Symbol::new(env, "recurring_released"),),
         (freelancer.clone(), amount, release_num),
+    );
+}
+
+pub fn dispute_raised(env: &Env, caller: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "dispute_raised"),),
+        (caller.clone(),),
+    );
+}
+
+pub fn dispute_resolved(env: &Env, released_to: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "dispute_resolved"),),
+        (released_to.clone(),),
     );
 }
