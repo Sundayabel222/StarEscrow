@@ -171,6 +171,7 @@ sequenceDiagram
 - [Protocol Specification](docs/PROTOCOL.md) — States, transitions, functions, events, and security model
 - [Deployment Guide](docs/DEPLOYMENT.md) — Build, deploy to testnet and mainnet, post-deployment checks
 - [Security & Threat Model](docs/SECURITY.md) — Trusted parties, attack vectors, mitigations, and out-of-scope threats
+- [Changelog](CHANGELOG.md) — Version history and notable changes
 
 ---
 
@@ -180,6 +181,52 @@ sequenceDiagram
 
 - [Rust](https://www.rust-lang.org/tools/install) with `wasm32-unknown-unknown` target
 - [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (`stellar`)
+
+### CLI Installation
+
+The StarEscrow CLI (`star-escrow`) provides a convenient interface for interacting with the escrow contract.
+
+#### Build from Source
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/henry-peters/StarEscrow.git
+   cd StarEscrow
+   ```
+
+2. Build the CLI in release mode:
+   ```bash
+   cargo build --release -p cli
+   ```
+
+3. The binary will be located at:
+   ```bash
+   ./target/release/star-escrow
+   ```
+
+4. (Optional) Install it to your PATH:
+   ```bash
+   # Linux/macOS
+   cp ./target/release/star-escrow /usr/local/bin/
+   
+   # Or using cargo install (if you have cargo-install)
+   cargo install --path clients/cli
+   ```
+
+#### Prerequisites for CLI
+
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable version)
+- [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli) (for contract interactions)
+
+#### Verify Installation
+
+After building, verify the CLI is working:
+
+```bash
+./target/release/star-escrow --help
+```
+
+You should see usage information for all available commands.
 
 ### Build
 
@@ -250,3 +297,7 @@ star-escrow cancel
 ```
 
 Run `star-escrow --help` for the full command reference.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

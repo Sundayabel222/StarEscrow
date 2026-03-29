@@ -4,12 +4,37 @@ pub fn escrow_created(
     env: &Env,
     payer: &Address,
     freelancer: &Address,
-    amount: i128,
-    milestone: &String,
+    total_amount: &i128,
+    milestones: &Vec<storage::Milestone>,
 ) {
     env.events().publish(
         (Symbol::new(env, "escrow_created"),),
-        (payer.clone(), freelancer.clone(), amount, milestone.clone()),
+        (payer.clone(), freelancer.clone(), total_amount.clone(), milestones.clone()),
+    );
+}
+
+pub fn milestone_submitted(
+    env: &Env,
+    freelancer: &Address,
+    idx: u32,
+    description: &String,
+) {
+    env.events().publish(
+        (Symbol::new(env, "milestone_submitted"),),
+        (freelancer.clone(), idx, description.clone()),
+    );
+}
+
+pub fn milestone_approved(
+    env: &Env,
+    freelancer: &Address,
+    idx: u32,
+    description: &String,
+    amount: i128,
+) {
+    env.events().publish(
+        (Symbol::new(env, "milestone_approved"),),
+        (freelancer.clone(), idx, description.clone(), amount),
     );
 }
 
@@ -43,6 +68,20 @@ pub fn freelancer_transferred(env: &Env, old: &Address, new: &Address) {
     env.events().publish(
         (Symbol::new(env, "freelancer_transferred"),),
         (old.clone(), new.clone()),
+    );
+}
+
+pub fn payer_transferred(env: &Env, old_payer: &Address, new_payer: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "payer_transferred"),),
+        (old_payer.clone(), new_payer.clone()),
+    );
+}
+
+pub fn deadline_extended(env: &Env, old_deadline: u64, new_deadline: u64) {
+    env.events().publish(
+        (Symbol::new(env, "deadline_extended"),),
+        (old_deadline, new_deadline),
     );
 }
 

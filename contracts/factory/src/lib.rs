@@ -71,13 +71,20 @@ fn load_escrow(env: &Env, id: EscrowId) -> Result<EscrowRecord, FactoryError> {
 }
 
 fn append_to_index(env: &Env, key: DataKey, id: EscrowId) {
-    let mut ids: Vec<EscrowId> = env.storage().instance().get(&key).unwrap_or_default();
+    let mut ids: Vec<EscrowId> = env
+        .storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
     ids.push_back(id);
     env.storage().instance().set(&key, &ids);
 }
 
 fn get_index(env: &Env, key: DataKey) -> Vec<EscrowId> {
-    env.storage().instance().get(&key).unwrap_or_default()
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────

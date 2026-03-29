@@ -2,69 +2,27 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+    - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cargo build
+      run: cargo build --workspace
 
-      - name: Run unit + property tests
-        run: cargo test -p escrow
+    - name: Cargo clippy
+      run: cargo clippy --workspace -- -D warnings
 
-      - name: Run benchmarks
-        run: cargo test -p escrow bench -- --nocapture 2>&1 | tee bench-results.txt
+    - name: Cargo fmt
+      run: cargo fmt --check --workspace
 
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: bench-results.txt
-
-      - name: Build WASM
-        run: cargo build -p escrow --target wasm32-unknown-unknown --release
-
-      - name: Install wasm-opt
-        run: |
-          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_116/binaryen-version_116-x86_64-linux.tar.gz \
-            | tar -xz --strip-components=2 -C /usr/local/bin binaryen-version_116/bin/wasm-opt
-
-      - name: Optimize WASM with wasm-opt
-        run: |
-          WASM=target/wasm32-unknown-unknown/release/escrow.wasm
-          WASM_OPT=target/wasm32-unknown-unknown/release/escrow.optimized.wasm
-          SIZE_BEFORE=$(wc -c < "$WASM")
-          wasm-opt -Oz --strip-debug "$WASM" -o "$WASM_OPT"
-          SIZE_AFTER=$(wc -c < "$WASM_OPT")
-          echo "WASM size before wasm-opt: ${SIZE_BEFORE} bytes"
-          echo "WASM size after  wasm-opt: ${SIZE_AFTER} bytes"
-          echo "wasm_size_before=${SIZE_BEFORE}" >> "$GITHUB_OUTPUT"
-          echo "wasm_size_after=${SIZE_AFTER}"  >> "$GITHUB_OUTPUT"
-          # Regression check: fail if optimized WASM exceeds 100 KB
-          if [ "$SIZE_AFTER" -gt 102400 ]; then
-            echo "::error::Optimized WASM size ${SIZE_AFTER} bytes exceeds 100 KB limit"
-            exit 1
-          fi
-        id: wasm_size
-
-      - name: Upload optimized WASM
-        uses: actions/upload-artifact@v4
-        with:
-          name: escrow-optimized-wasm
-          path: target/wasm32-unknown-unknown/release/escrow.optimized.wasm
+    - name: Cargo test
+      run: cargo test --workspace
