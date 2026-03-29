@@ -91,7 +91,7 @@ fn test_full_happy_path() {
     assert_eq!(s.token.balance(&s.payer), 9500);
     assert_eq!(s.token.balance(&s.contract.address), 500);
 
-    s.contract.submit_work(0);
+    s.contract.submit(0);
     s.contract.approve(0);
     assert_eq!(s.token.balance(&s.freelancer), 500);
 }
@@ -116,7 +116,7 @@ fn test_approve_before_submit_fails() {
 fn test_cancel_after_submit_fails() {
     let s = Setup::new();
     s.simple_create(200, "Write tests");
-    s.contract.submit_work();
+    s.contract.submit();
     let err = s.contract.try_cancel().unwrap_err().unwrap();
     assert_eq!(err, EscrowError::NotActive);
 }
@@ -159,7 +159,7 @@ fn test_get_status_lifecycle() {
     let s = Setup::new();
     s.simple_create(100, "Status test");
     assert_eq!(s.contract.get_status(), EscrowStatus::Active);
-    s.contract.submit_work();
+    s.contract.submit();
     assert_eq!(s.contract.get_status(), EscrowStatus::WorkSubmitted);
     s.contract.approve();
     assert_eq!(s.contract.get_status(), EscrowStatus::Completed);
@@ -177,22 +177,22 @@ fn test_get_status_expired() {
 }
 
 #[test]
-fn test_transfer_freelancer_and_submit_work() {
+fn test_transfer_freelancer_and_submit() {
     let s = Setup::new();
     let new_freelancer = test_address("new_freelancer");
     s.simple_create(400, "Subcontract work");
     s.contract.transfer_freelancer(&new_freelancer);
-    s.contract.submit_work();
+    s.contract.submit();
     s.contract.approve();
     assert_eq!(s.token.balance(&new_freelancer), 400);
 }
 
 #[test]
-fn test_pause_blocks_submit_work() {
+fn test_pause_blocks_submit() {
     let s = Setup::new();
     s.simple_create(100, "Paused submit");
     s.contract.pause();
-    let err = s.contract.try_submit_work().unwrap_err().unwrap();
+    let err = s.contract.try_submit().unwrap_err().unwrap();
     assert_eq!(err, EscrowError::Paused);
 }
 
@@ -202,7 +202,7 @@ fn test_unpause_restores_operations() {
     s.contract.pause();
     s.contract.unpause();
     s.simple_create(100, "Unpause test");
-    s.contract.submit_work();
+    s.contract.submit();
     s.contract.approve();
     assert_eq!(s.token.balance(&s.freelancer), 100);
 }
@@ -211,7 +211,7 @@ fn test_unpause_restores_operations() {
 fn test_fee_deducted_on_approve() {
     let s = Setup::new_with_fee(100); // 1%
     s.simple_create(500, "Fee test");
-    s.contract.submit_work();
+    s.contract.submit();
     s.contract.approve();
     assert_eq!(s.token.balance(&s.freelancer), 495);
 }
@@ -220,7 +220,7 @@ fn test_fee_deducted_on_approve() {
 fn test_zero_fee_full_payment() {
     let s = Setup::new();
     s.simple_create(500, "Zero fee");
-    s.contract.submit_work();
+    s.contract.submit();
     s.contract.approve();
     assert_eq!(s.token.balance(&s.freelancer), 500);
 }
@@ -411,10 +411,10 @@ fn test_ttl_extended_after_create() {
 }
 
 #[test]
-fn test_ttl_extended_after_submit_work() {
+fn test_ttl_extended_after_submit() {
     let s = Setup::new();
     s.simple_create(100, "TTL submit");
-    s.contract.submit_work();
+    s.contract.submit();
     assert_eq!(s.contract.get_status(), EscrowStatus::WorkSubmitted);
 }
 
@@ -422,7 +422,7 @@ fn test_ttl_extended_after_submit_work() {
 fn test_ttl_extended_after_approve() {
     let s = Setup::new();
     s.simple_create(100, "TTL approve");
-    s.contract.submit_work();
+    s.contract.submit();
     s.contract.approve();
     assert_eq!(s.contract.get_status(), EscrowStatus::Completed);
 }

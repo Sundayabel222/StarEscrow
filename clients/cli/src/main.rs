@@ -215,8 +215,8 @@ fn main() -> Result<()> {
                 "Escrow created. Funds locked.");
         }
         Commands::SubmitWork { contract_id, freelancer_secret } => {
-            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &freelancer_secret, "submit_work", &[])?;
-            output(as_json, json!({"status":"ok","action":"submit_work"}), "Work submitted. Waiting for payer approval.");
+            invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &freelancer_secret, "submit", &[])?;
+            output(as_json, json!({"status":"ok","action":"submit"}), "Work submitted. Waiting for payer approval.");
         }
         Commands::TransferFreelancer { contract_id, freelancer_secret, new_freelancer } => {
             invoke_stellar_cli(
@@ -474,7 +474,7 @@ fn run_estimate_fee(
 ) -> Result<()> {
     let function = match operation {
         "create" => "create",
-        "submit-work" => "submit_work",
+        "submit-work" => "submit",
         "approve" => "approve",
         "cancel" => "cancel",
         "expire" => "expire",

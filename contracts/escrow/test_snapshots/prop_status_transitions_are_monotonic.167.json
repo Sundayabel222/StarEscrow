@@ -140,7 +140,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-              "function_name": "submit_work",
+              "function_name": "submit",
               "args": []
             }
           },
@@ -1497,7 +1497,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000006"
               },
               {
-                "symbol": "submit_work"
+                "symbol": "submit"
               }
             ],
             "data": "void"
@@ -1542,7 +1542,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "submit_work"
+                "symbol": "submit"
               }
             ],
             "data": "void"

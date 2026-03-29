@@ -65,7 +65,7 @@ proptest! {
         simple_create(&env, &contract, &payer, &freelancer, &token_addr, amount);
 
         prop_assert_eq!(token.balance(&contract.address), amount);
-        contract.submit_work();
+        contract.submit();
         contract.approve();
         prop_assert_eq!(token.balance(&contract.address), 0);
         prop_assert_eq!(token.balance(&freelancer), amount);
@@ -87,7 +87,7 @@ proptest! {
         simple_create(&env, &contract, &payer, &freelancer, &token_addr, amount);
 
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::Active);
-        contract.submit_work();
+        contract.submit();
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::WorkSubmitted);
         contract.approve();
         prop_assert_eq!(contract.get_escrow().status, EscrowStatus::Completed);
@@ -106,7 +106,7 @@ proptest! {
     fn prop_cancel_requires_active_status(amount in 1i128..=1_000_000i128) {
         let (env, payer, freelancer, token_addr, _token, contract) = setup(amount);
         simple_create(&env, &contract, &payer, &freelancer, &token_addr, amount);
-        contract.submit_work();
+        contract.submit();
 
         let result = contract.try_cancel();
         prop_assert!(result.is_err(), "cancel after submit must fail");
