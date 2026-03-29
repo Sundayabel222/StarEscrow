@@ -2,9 +2,9 @@
 
 use escrow::{EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, YieldRecipient, storage::{Milestone, MilestoneStatus}};
 use soroban_sdk::{
-    testutils::Ledger as _,
+    testutils::{Address as _, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, String,
+    Address, Env, IntoVal, String,
 };
 
 fn create_token<'a>(env: &Env, admin: &Address) -> (TokenClient<'a>, StellarAssetClient<'a>) {
@@ -40,6 +40,10 @@ struct Setup<'a> {
 
 impl<'a> Setup<'a> {
     fn new() -> Self {
+        Self::with_fee(0)
+    }
+
+    fn with_fee(fee_bps: u32) -> Self {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -60,28 +64,17 @@ impl<'a> Setup<'a> {
         Setup { env, payer, freelancer, token, token_addr, contract }
     }
 
-    fn with_fee(fee_bps: u32) -> Self {
-        let mut s = Self::new();
-        // Re-init with fee (hack for test)
-        s.contract.init(&Address::generate(&s.env), &fee_bps, &Address::generate(&s.env));
-        s
-    }
-
     fn simple_create(&self, amount: i128, milestone: &str) {
-        let m = storage::Milestone {
-            description: String::from_str(&self.env, milestone),
-            amount,
-            status: storage::MilestoneStatus::Pending,
-        };
-        let milestones = vec![&self.env, m];
+        let m = String::from_str(&self.env, milestone);
         self.contract.create(
             &self.payer,
             &self.freelancer,
             &self.token_addr,
-            milestones,
+            &amount,
+            &m,
             &None,
             &None,
-            &storage::YieldRecipient::Payer,
+            &YieldRecipient::Payer,
             &0u64,
             &0u32,
         );
@@ -413,44 +406,140 @@ fn test_recurring_cancel_refunds_remaining() {
 #[test]
 fn test_ttl_extended_after_create() {
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "TTL test");
-
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None, &None, &YieldRecipient::Payer, &0u64, &0u32);
-
-    // After create the instance TTL should be extended; verify storage is still accessible.
-    assert_eq!(s.contract.get_status(), escrow::EscrowStatus::Active);
+    s.simple_create(100, "TTL test");
+    assert_eq!(s.contract.get_status(), EscrowStatus::Active);
 }
 
 #[test]
 fn test_ttl_extended_after_submit_work() {
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "TTL submit");
-
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None, &None, &YieldRecipient::Payer, &0u64, &0u32);
+    s.simple_create(100, "TTL submit");
     s.contract.submit_work();
-
-    assert_eq!(s.contract.get_status(), escrow::EscrowStatus::WorkSubmitted);
+    assert_eq!(s.contract.get_status(), EscrowStatus::WorkSubmitted);
 }
 
 #[test]
 fn test_ttl_extended_after_approve() {
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "TTL approve");
-
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None, &None, &YieldRecipient::Payer, &0u64, &0u32);
+    s.simple_create(100, "TTL approve");
     s.contract.submit_work();
     s.contract.approve();
-
-    assert_eq!(s.contract.get_status(), escrow::EscrowStatus::Completed);
+    assert_eq!(s.contract.get_status(), EscrowStatus::Completed);
 }
 
 #[test]
 fn test_ttl_extended_after_cancel() {
     let s = Setup::new();
-    let milestone = String::from_str(&s.env, "TTL cancel");
-
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &milestone, &None, &None, &YieldRecipient::Payer, &0u64, &0u32);
+    s.simple_create(100, "TTL cancel");
     s.contract.cancel();
+    assert_eq!(s.contract.get_status(), EscrowStatus::Cancelled);
+}
 
-    assert_eq!(s.contract.get_status(), escrow::EscrowStatus::Cancelled);
+// ── transfer_payer tests ──────────────────────────────────────────────────────
+
+#[test]
+fn test_transfer_payer_success() {
+    let s = Setup::new();
+    s.simple_create(100, "Transfer payer");
+    let new_payer = Address::generate(&s.env);
+    s.contract.transfer_payer(&new_payer);
+    let data = s.contract.get_escrow();
+    assert_eq!(data.payer, new_payer);
+    assert_eq!(data.freelancer, s.freelancer);
+    assert_eq!(data.amount, 100);
+    assert_eq!(data.status, EscrowStatus::Active);
+}
+
+#[test]
+fn test_transfer_payer_paused() {
+    let s = Setup::new();
+    s.simple_create(100, "Transfer payer paused");
+    s.contract.pause();
+    let new_payer = Address::generate(&s.env);
+    let err = s.contract.try_transfer_payer(&new_payer).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::Paused);
+}
+
+// ── extend_deadline tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_extend_deadline_success() {
+    let s = Setup::new();
+    let m = String::from_str(&s.env, "Extend deadline");
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &m, &Some(1000u64), &None, &YieldRecipient::Payer, &0u64, &0u32);
+    s.contract.extend_deadline(&2000u64);
+    let data = s.contract.get_escrow();
+    assert_eq!(data.deadline, Some(2000u64));
+    assert_eq!(data.payer, s.payer);
+    assert_eq!(data.amount, 100);
+}
+
+#[test]
+fn test_extend_deadline_equal_fails() {
+    let s = Setup::new();
+    let m = String::from_str(&s.env, "Equal deadline");
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &m, &Some(1000u64), &None, &YieldRecipient::Payer, &0u64, &0u32);
+    let err = s.contract.try_extend_deadline(&1000u64).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InvalidDeadline);
+}
+
+#[test]
+fn test_extend_deadline_less_fails() {
+    let s = Setup::new();
+    let m = String::from_str(&s.env, "Less deadline");
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &m, &Some(1000u64), &None, &YieldRecipient::Payer, &0u64, &0u32);
+    let err = s.contract.try_extend_deadline(&500u64).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InvalidDeadline);
+}
+
+#[test]
+fn test_extend_deadline_none_fails() {
+    let s = Setup::new();
+    s.simple_create(100, "No deadline");
+    let err = s.contract.try_extend_deadline(&1000u64).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::InvalidDeadline);
+}
+
+#[test]
+fn test_extend_deadline_paused() {
+    let s = Setup::new();
+    let m = String::from_str(&s.env, "Paused deadline");
+    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &100, &m, &Some(1000u64), &None, &YieldRecipient::Payer, &0u64, &0u32);
+    s.contract.pause();
+    let err = s.contract.try_extend_deadline(&2000u64).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::Paused);
+}
+
+// ── Unauthorized cancel test ──────────────────────────────────────────────────
+
+#[test]
+fn test_cancel_unauthorized() {
+    use soroban_sdk::testutils::MockAuth;
+    use soroban_sdk::testutils::MockAuthInvoke;
+
+    let s = Setup::new();
+    s.simple_create(100, "Unauthorized cancel");
+
+    // Generate an attacker address distinct from payer and freelancer
+    let attacker = Address::generate(&s.env);
+
+    // Disable mock_all_auths and provide only the attacker's auth for cancel.
+    // The payer's require_auth() inside cancel will not be satisfied.
+    s.env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &s.contract.address,
+            fn_name: "cancel",
+            args: ().into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    // The call must fail because the payer's auth is not present
+    let result = s.contract.try_cancel();
+    assert!(result.is_err(), "cancel by attacker should fail");
+
+    // Status must remain Active — re-enable mock_all_auths to read state
+    s.env.mock_all_auths();
+    assert_eq!(s.contract.get_escrow().status, EscrowStatus::Active);
 }

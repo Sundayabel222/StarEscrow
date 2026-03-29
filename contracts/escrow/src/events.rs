@@ -71,6 +71,20 @@ pub fn freelancer_transferred(env: &Env, old: &Address, new: &Address) {
     );
 }
 
+pub fn payer_transferred(env: &Env, old_payer: &Address, new_payer: &Address) {
+    env.events().publish(
+        (Symbol::new(env, "payer_transferred"),),
+        (old_payer.clone(), new_payer.clone()),
+    );
+}
+
+pub fn deadline_extended(env: &Env, old_deadline: u64, new_deadline: u64) {
+    env.events().publish(
+        (Symbol::new(env, "deadline_extended"),),
+        (old_deadline, new_deadline),
+    );
+}
+
 pub fn contract_paused(env: &Env, admin: &Address) {
     env.events().publish(
         (Symbol::new(env, "contract_paused"),),

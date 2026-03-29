@@ -394,7 +394,39 @@ impl EscrowContract {
         Ok(())
     }
 
-pub fn get_status(env: Env) -> storage::EscrowStatus {
+    pub fn transfer_payer(env: Env, new_payer: Address) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        let mut data = storage::load_escrow(&env);
+        data.payer.require_auth();
+        let old = data.payer.clone();
+        data.payer = new_payer.clone();
+        storage::save_escrow(&env, &data);
+        events::payer_transferred(&env, &old, &new_payer);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
+    /// Payer extends the escrow deadline to a strictly later timestamp.
+    pub fn extend_deadline(env: Env, new_deadline: u64) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        let mut data = storage::load_escrow(&env);
+        data.payer.require_auth();
+        let current = match data.deadline {
+            Some(d) => d,
+            None => return Err(EscrowError::InvalidDeadline),
+        };
+        if new_deadline <= current {
+            return Err(EscrowError::InvalidDeadline);
+        }
+        let old_deadline = current;
+        data.deadline = Some(new_deadline);
+        storage::save_escrow(&env, &data);
+        events::deadline_extended(&env, old_deadline, new_deadline);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
+    pub fn get_status(env: Env) -> storage::EscrowStatus {
         storage::load_escrow(&env).status
     }
 
@@ -431,5 +463,4 @@ pub fn get_status(env: Env) -> storage::EscrowStatus {
         }
         Ok(())
     }
-
 }
