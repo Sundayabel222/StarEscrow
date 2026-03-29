@@ -53,6 +53,13 @@ pub fn payer_transferred(env: &Env, old_payer: &Address, new_payer: &Address) {
     );
 }
 
+pub fn milestone_updated(env: &Env, old: &String, new: &String) {
+    env.events().publish(
+        (Symbol::new(env, "milestone_updated"),),
+        (old.clone(), new.clone()),
+    );
+}
+
 pub fn deadline_extended(env: &Env, old_deadline: u64, new_deadline: u64) {
     env.events().publish(
         (Symbol::new(env, "deadline_extended"),),

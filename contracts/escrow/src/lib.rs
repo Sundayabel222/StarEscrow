@@ -341,6 +341,22 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Payer updates the milestone description while escrow is Active.
+    pub fn update_milestone(env: Env, new_milestone: String) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        let mut data = storage::load_escrow(&env);
+        if data.status != EscrowStatus::Active {
+            return Err(EscrowError::NotActive);
+        }
+        data.payer.require_auth();
+        let old = data.milestone.clone();
+        data.milestone = new_milestone.clone();
+        storage::save_escrow(&env, &data);
+        events::milestone_updated(&env, &old, &new_milestone);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
     /// Returns the contract's token balance for the given token address.
     pub fn get_balance(env: Env, token: Address) -> i128 {
         token::Client::new(&env, &token).balance(&env.current_contract_address())

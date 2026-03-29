@@ -432,6 +432,48 @@ fn test_get_balance_after_cancel() {
     assert_eq!(s.contract.get_balance(&s.token_addr), 0);
 }
 
+// ── update_milestone ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_update_milestone_success() {
+    let s = Setup::new();
+    s.simple_create(100, "Original milestone");
+    let new_desc = String::from_str(&s.env, "Updated milestone");
+    s.contract.update_milestone(&new_desc);
+    assert_eq!(s.contract.get_escrow().milestone, new_desc);
+}
+
+#[test]
+fn test_update_milestone_unauthorized() {
+    use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
+    let s = Setup::new();
+    s.simple_create(100, "Original milestone");
+    let attacker = Address::generate(&s.env);
+    let new_desc = String::from_str(&s.env, "Hacked milestone");
+    s.env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &s.contract.address,
+            fn_name: "update_milestone",
+            args: (new_desc.clone(),).into_val(&s.env),
+            sub_invokes: &[],
+        },
+    }]);
+    let result = s.contract.try_update_milestone(&new_desc);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_milestone_not_active_fails() {
+    let s = Setup::new();
+    s.simple_create(100, "Milestone");
+    s.contract.submit_work();
+    s.contract.approve();
+    let new_desc = String::from_str(&s.env, "Too late");
+    let err = s.contract.try_update_milestone(&new_desc).unwrap_err().unwrap();
+    assert_eq!(err, EscrowError::NotActive);
+}
+
 #[test]
 fn test_ttl_extended_after_create() {
     let s = Setup::new();
