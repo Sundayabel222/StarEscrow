@@ -156,7 +156,7 @@ impl EscrowFactory {
     }
 
     /// Freelancer submits work for a specific escrow.
-    pub fn submit_work(env: Env, id: EscrowId) -> Result<(), FactoryError> {
+    pub fn submit(env: Env, id: EscrowId) -> Result<(), FactoryError> {
         let mut record = load_escrow(&env, id)?;
         if record.status != EscrowStatus::Active {
             return Err(FactoryError::NotActive);

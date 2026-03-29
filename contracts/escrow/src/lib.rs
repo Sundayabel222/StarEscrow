@@ -167,7 +167,7 @@ impl EscrowContract {
     }
 
     /// Freelancer marks milestone as submitted.
-    pub fn submit_work(env: Env, milestone_idx: u32) -> Result<(), EscrowError> {
+    pub fn submit(env: Env, milestone_idx: u32) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
         if data.status != storage::EscrowStatus::Active {
