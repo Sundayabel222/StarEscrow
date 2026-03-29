@@ -5,6 +5,7 @@ use sha2::{Sha256, Digest};
 
 mod keypair;
 mod wasm_hash;
+mod xdr;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
