@@ -118,6 +118,16 @@ pub enum DataKey {
     Escrow(EscrowId),
     Config,
     ReputationContract,
+    /// Address of the governance contract allowed to call gov_apply.
+    GovernanceContract,
+}
+
+pub fn save_governance_contract(env: &Env, addr: &Address) {
+    env.storage().instance().set(&DataKey::GovernanceContract, addr);
+}
+
+pub fn load_governance_contract(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::GovernanceContract)
 }
 
 const DEFAULT_ESCROW_ID: EscrowId = 0;
