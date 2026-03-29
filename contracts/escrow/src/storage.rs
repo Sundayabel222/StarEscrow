@@ -125,26 +125,31 @@ pub fn has_escrow(env: &Env) -> bool {
         .has(&DataKey::Escrow(DEFAULT_ESCROW_ID))
 }
 
+#[allow(dead_code)]
 pub fn read_config(env: &Env) -> Option<RateLimitConfig> {
     env.storage().instance().get(&RateKey::Config)
 }
 
+#[allow(dead_code)]
 pub fn write_config(env: &Env, config: &RateLimitConfig) {
     env.storage().instance().set(&RateKey::Config, config);
 }
 
+#[allow(dead_code)]
 pub fn read_payer_stats(env: &Env, payer: &Address) -> Option<PayerStats> {
     env.storage()
         .instance()
         .get(&RateKey::PayerStats(payer.clone()))
 }
 
+#[allow(dead_code)]
 pub fn write_payer_stats(env: &Env, payer: &Address, stats: &PayerStats) {
     env.storage()
         .instance()
         .set(&RateKey::PayerStats(payer.clone()), stats);
 }
 
+#[allow(dead_code)]
 pub fn check_and_update_rate_limit(
     env: &Env,
     payer: Address,
@@ -174,34 +179,43 @@ pub fn check_and_update_rate_limit(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn read_allowed_tokens(env: &Env) -> Vec<Address> {
     env.storage()
         .instance()
         .get(&AllowListKey::Tokens)
-        .unwrap_or_default()
+        .unwrap_or_else(|| Vec::new(env))
 }
 
+#[allow(dead_code)]
 pub fn write_allowed_tokens(env: &Env, tokens: &Vec<Address>) {
     env.storage().instance().set(&AllowListKey::Tokens, tokens);
 }
 
+#[allow(dead_code)]
 pub fn add_to_allowlist(env: &Env, token: Address) -> bool {
     let mut tokens = read_allowed_tokens(env);
     if tokens.contains(&token) {
         false
     } else {
-        tokens.push(token);
+        tokens.push_back(token);
         write_allowed_tokens(env, &tokens);
         true
     }
 }
 
+#[allow(dead_code)]
 pub fn remove_from_allowlist(env: &Env, token: Address) -> bool {
-    let mut tokens = read_allowed_tokens(env);
+    let tokens = read_allowed_tokens(env);
     let before = tokens.len();
-    tokens.retain(|t| t != &token);
-    if tokens.len() < before {
-        write_allowed_tokens(env, &tokens);
+    let mut new_tokens = Vec::new(env);
+    for t in tokens.iter() {
+        if t != token {
+            new_tokens.push_back(t);
+        }
+    }
+    if new_tokens.len() < before {
+        write_allowed_tokens(env, &new_tokens);
         true
     } else {
         false
@@ -223,10 +237,12 @@ pub fn has_config(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Config)
 }
 
+#[allow(dead_code)]
 pub fn save_reputation_contract(env: &Env, addr: &Address) {
     env.storage().instance().set(&DataKey::ReputationContract, addr);
 }
 
+#[allow(dead_code)]
 pub fn load_reputation_contract(env: &Env) -> Option<Address> {
     env.storage().instance().get(&DataKey::ReputationContract)
 }

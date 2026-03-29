@@ -13,10 +13,10 @@ fn setup(
     let env = Env::default();
     env.mock_all_auths();
 
-    let payer = Address::generate(&env);
-    let freelancer = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let fee_collector = Address::generate(&env);
+    let payer = Address::from_string(&String::from_str(&env, "GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQZPKJEQCSBETHOTGQBERD2B"));
+    let freelancer = Address::from_string(&String::from_str(&env, "GAUIA3YXQZ4R7IKQDGHYGY2QXL5QOFJYQZPKJEQCSBETHOTGQBERD3C"));
+    let admin = Address::from_string(&String::from_str(&env, "GAXI3YXQZ4R7IKQDGHYGY2QXL5QOFJYQZPKJEQCSBETHOTGQBERD4D"));
+    let fee_collector = Address::from_string(&String::from_str(&env, "GBYI3YXQZ4R7IKQDGHYGY2QXL5QOFJYQZPKJEQCSBETHOTGQBERD5E"));
 
     let token_addr = env.register_stellar_asset_contract_v2(admin.clone());
     let token: TokenClient<'static> =
@@ -98,7 +98,7 @@ proptest! {
         simple_create(&env, &contract, &payer, &freelancer, &token_addr, amount);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            contract.approve(&payer);
+            contract.approve();
         }));
         prop_assert!(result.is_err(), "approve before submit must panic");
     }

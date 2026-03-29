@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
-use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
+use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
-use std::io;
+use sha2::{Sha256, Digest};
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -324,6 +323,7 @@ fn upsert_env_var(path: &std::path::Path, key: &str, value: &str) -> Result<()> 
 // Setup wizard
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn run_setup_wizard() -> Result<()> {
     use dialoguer::{Input, Select};
 
@@ -425,6 +425,7 @@ fn run_setup_wizard() -> Result<()> {
 // Estimate fee
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn run_estimate_fee(
     rpc_url: &str,
     network_passphrase: &str,
@@ -487,6 +488,7 @@ fn run_estimate_fee(
 // Export
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn run_export(rpc_url: &str, network_passphrase: &str, contract_id: &str, out_path: &str) -> Result<()> {
     let raw = query_contract(rpc_url, network_passphrase, contract_id, "get_escrow")?;
 
@@ -577,6 +579,7 @@ fn fetch_events(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> R
     Ok(events)
 }
 
+#[allow(dead_code)]
 fn fetch_remote_wasm_hash(rpc_url: &str, network_passphrase: &str, contract_id: &str) -> Result<String> {
     let out = std::process::Command::new("stellar")
         .args([

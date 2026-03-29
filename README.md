@@ -241,3 +241,7 @@ star-escrow cancel
 ```
 
 Run `star-escrow --help` for the full command reference.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
