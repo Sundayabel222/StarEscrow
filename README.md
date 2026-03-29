@@ -231,14 +231,23 @@ You should see usage information for all available commands.
 ### Build
 
 ```bash
-stellar contract build
+make build
 ```
 
 ### Test
 
 ```bash
-cargo test -p escrow
+make test
 ```
+
+### Lint & Format
+
+```bash
+make lint
+make fmt
+```
+
+A `Makefile` is provided with targets: `build`, `test`, `lint`, `fmt`, `clean`.
 
 ### Deploy
 
