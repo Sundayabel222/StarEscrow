@@ -20,3 +20,56 @@ lto = true
 # Identical to release but named explicitly so CI can reference it.
 [profile.contract-release]
 inherits = "release"
+
+# Workspace-level clippy lints
+[workspace.lints.clippy]
+# Allow specific lints that may be too strict for this project
+# Allow: too many arguments (common in contract functions)
+too_many_arguments = "allow"
+# Allow: type complexity (common in generic code)
+type_complexity = "allow"
+# Allow: large enum variants (common in error handling)
+large_enum_variant = "allow"
+# Allow: module inception (common in contract structure)
+module_inception = "allow"
+# Allow: missing errors doc (errors are documented in lib.rs)
+missing_errors_doc = "allow"
+# Allow: missing panics doc (panics are documented in lib.rs)
+missing_panics_doc = "allow"
+# Allow: missing safety doc (no unsafe code in this project)
+missing_safety_doc = "allow"
+# Allow: must_use_candidate (not all functions need this)
+must_use_candidate = "allow"
+# Allow: return_self_not_must_use (not all builders need this)
+return_self_not_must_use = "allow"
+# Allow: unused_self (common in trait implementations)
+unused_self = "allow"
+# Allow: needless_pass_by_value (common in contract functions)
+needless_pass_by_value = "allow"
+# Allow: too_many_lines (common in contract functions)
+too_many_lines = "allow"
+# Allow: single_call_fn (common in contract functions)
+single_call_fn = "allow"
+# Allow: unused_async (common in contract functions)
+unused_async = "allow"
+# Allow: impl_trait_in_params (common in contract functions)
+impl_trait_in_params = "allow"
+# Allow: similar_names (common in contract functions)
+similar_names = "allow"
+
+# Enable all clippy lints (lower priority than individual lints)
+all = { level = "warn", priority = -1 }
+# Enable pedantic lints (lower priority than individual lints)
+pedantic = { level = "warn", priority = -1 }
+# Enable nursery lints (lower priority than individual lints)
+nursery = { level = "warn", priority = -1 }
+# Enable cargo lints (lower priority than individual lints)
+cargo = { level = "warn", priority = -1 }
+# Enable complexity lints (lower priority than individual lints)
+complexity = { level = "warn", priority = -1 }
+# Enable correctness lints (lower priority than individual lints)
+correctness = { level = "warn", priority = -1 }
+# Enable perf lints (lower priority than individual lints)
+perf = { level = "warn", priority = -1 }
+# Enable style lints (lower priority than individual lints)
+style = { level = "warn", priority = -1 }

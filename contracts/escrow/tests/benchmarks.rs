@@ -6,9 +6,9 @@
 
 #![cfg(test)]
 
-use escrow::{EscrowContract, EscrowContractClient};
+use escrow::{EscrowContract, EscrowContractClient, YieldRecipient};
 use soroban_sdk::{
-    testutils::budget::Budget,
+    testutils::{Address as _, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, String,
 };
@@ -46,30 +46,44 @@ impl<'a> BenchSetup<'a> {
         contract.init(&admin, &0u32, &fee_collector);
         BenchSetup { env, payer, freelancer, token, token_addr, contract }
     }
+
+    fn simple_create(&self, milestone: &str) {
+        let m = String::from_str(&self.env, milestone);
+        self.contract.create(
+            &self.payer,
+            &self.freelancer,
+            &self.token_addr,
+            &1000,
+            &m,
+            &None,
+            &None,
+            &YieldRecipient::Payer,
+            &0u64,
+            &0u32,
+        );
+    }
 }
 
-fn print_budget(label: &str, budget: &Budget) {
+fn print_budget(label: &str, budget: &soroban_sdk::testutils::budget::Budget) {
     println!(
         "[bench] {label}: cpu={} mem={}",
         budget.cpu_instruction_cost(),
-        budget.mem_byte_cost(),
+        budget.memory_bytes_cost(),
     );
 }
 
 #[test]
 fn bench_create() {
     let s = BenchSetup::new();
-    let milestone = String::from_str(&s.env, "bench milestone");
     s.env.budget().reset_default();
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &None);
+    s.simple_create("bench milestone");
     print_budget("create", &s.env.budget());
 }
 
 #[test]
 fn bench_submit_work() {
     let s = BenchSetup::new();
-    let milestone = String::from_str(&s.env, "bench milestone");
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &None);
+    s.simple_create("bench milestone");
     s.env.budget().reset_default();
     s.contract.submit_work();
     print_budget("submit_work", &s.env.budget());
@@ -78,8 +92,7 @@ fn bench_submit_work() {
 #[test]
 fn bench_approve() {
     let s = BenchSetup::new();
-    let milestone = String::from_str(&s.env, "bench milestone");
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &None);
+    s.simple_create("bench milestone");
     s.contract.submit_work();
     s.env.budget().reset_default();
     s.contract.approve();
@@ -89,8 +102,7 @@ fn bench_approve() {
 #[test]
 fn bench_cancel() {
     let s = BenchSetup::new();
-    let milestone = String::from_str(&s.env, "bench milestone");
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &None);
+    s.simple_create("bench milestone");
     s.env.budget().reset_default();
     s.contract.cancel();
     print_budget("cancel", &s.env.budget());
@@ -101,7 +113,18 @@ fn bench_expire() {
     let s = BenchSetup::new();
     let milestone = String::from_str(&s.env, "bench milestone");
     s.env.ledger().with_mut(|l| l.timestamp = 100);
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &Some(500u64));
+    s.contract.create(
+        &s.payer,
+        &s.freelancer,
+        &s.token_addr,
+        &1000,
+        &milestone,
+        &Some(500u64),
+        &None,
+        &YieldRecipient::Payer,
+        &0u64,
+        &0u32,
+    );
     s.env.ledger().with_mut(|l| l.timestamp = 1000);
     s.env.budget().reset_default();
     s.contract.expire();
@@ -111,8 +134,7 @@ fn bench_expire() {
 #[test]
 fn bench_get_status() {
     let s = BenchSetup::new();
-    let milestone = String::from_str(&s.env, "bench milestone");
-    s.contract.create(&s.payer, &s.freelancer, &s.token_addr, &1000, &milestone, &None);
+    s.simple_create("bench milestone");
     s.env.budget().reset_default();
     s.contract.get_status();
     print_budget("get_status", &s.env.budget());

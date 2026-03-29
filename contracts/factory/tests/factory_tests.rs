@@ -28,9 +28,9 @@ impl<'a> Setup<'a> {
         let env = Env::default();
         env.mock_all_auths();
 
-        let payer = Address::generate(&env);
-        let freelancer = Address::generate(&env);
-        let admin = Address::generate(&env);
+        let payer = Address::from_string(&String::from_str(&env, "payer"));
+        let freelancer = Address::from_string(&String::from_str(&env, "freelancer"));
+        let admin = Address::from_string(&String::from_str(&env, "admin"));
 
         let (token, token_admin) = create_token(&env, &admin);
         let token_addr = token.address.clone();
@@ -167,7 +167,7 @@ fn test_factory_list_by_freelancer() {
 #[test]
 fn test_factory_list_by_payer_empty_for_unknown() {
     let s = Setup::new();
-    let unknown = Address::generate(&s.env);
+    let unknown = Address::from_string(&String::from_str(&s.env, "unknown"));
     let ids = s.factory.list_by_payer(&unknown);
     assert_eq!(ids.len(), 0);
 }
@@ -175,8 +175,8 @@ fn test_factory_list_by_payer_empty_for_unknown() {
 #[test]
 fn test_factory_multiple_payers_isolated() {
     let s = Setup::new();
-    let payer2 = Address::generate(&s.env);
-    let (_, token_admin) = create_token(&s.env, &Address::generate(&s.env));
+    let payer2 = Address::from_string(&String::from_str(&s.env, "payer2"));
+    let (_, _token_admin) = create_token(&s.env, &Address::from_string(&String::from_str(&s.env, "token_admin")));
     // Mint for payer2 using the same token
     // (In practice we'd need the token admin — skip balance check, just verify index isolation)
     let m = String::from_str(&s.env, "P1 escrow");
