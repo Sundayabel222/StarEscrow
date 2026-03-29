@@ -1334,7 +1334,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000006"
               },
               {
-                "symbol": "submit_work"
+                "symbol": "submit"
               }
             ],
             "data": "void"
@@ -1355,7 +1355,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "submit_work"
+                "symbol": "submit"
               }
             ],
             "data": {
@@ -1416,7 +1416,7 @@
                   "string": "contract try_call failed"
                 },
                 {
-                  "symbol": "submit_work"
+                  "symbol": "submit"
                 },
                 {
                   "vec": []
