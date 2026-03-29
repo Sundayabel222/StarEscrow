@@ -6,6 +6,7 @@ use sha2::{Sha256, Digest};
 mod keypair;
 mod wasm_hash;
 mod xdr;
+mod deadline;
 
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
@@ -106,8 +107,9 @@ enum Commands {
         amount: i128,
         #[arg(long)]
         milestone: String,
+        /// Deadline as ISO 8601 (e.g. "2026-12-31T23:59:59Z") or Unix timestamp (seconds).
         #[arg(long)]
-        deadline: Option<u64>,
+        deadline: Option<String>,
     },
     /// Freelancer submits work
     SubmitWork {
@@ -221,7 +223,19 @@ fn main() -> Result<()> {
         }
         Commands::Create { contract_id, payer_secret, freelancer, token, amount, milestone, deadline } => {
             let payer_addr = stellar_address_from_secret(&payer_secret)?;
-            let deadline_str = deadline.map(|d| d.to_string()).unwrap_or_else(|| "null".into());
+            // Accept ISO 8601 string or raw Unix timestamp integer
+            let deadline_ts: Option<u64> = match &deadline {
+                None => None,
+                Some(s) => {
+                    let ts = s.parse::<u64>()
+                        .ok()
+                        .map(Ok)
+                        .unwrap_or_else(|| deadline::parse_iso8601_to_timestamp(s))?;
+                    Some(ts)
+                }
+            };
+            let deadline_str = deadline_ts.map(|d| d.to_string()).unwrap_or_else(|| "null".into());
+            let deadline_human = deadline_ts.map(|d| deadline::format_timestamp(d));
             invoke_stellar_cli(
                 &rpc_url, &network_passphrase, &contract_id, &payer_secret, "create",
                 &["--payer", &payer_addr, "--freelancer", &freelancer, "--token", &token,
@@ -229,8 +243,10 @@ fn main() -> Result<()> {
             )?;
             output(as_json,
                 json!({"status":"ok","action":"create","contract_id":contract_id,"payer":payer_addr,
-                       "freelancer":freelancer,"amount":amount,"milestone":milestone,"deadline":deadline}),
-                "Escrow created. Funds locked.");
+                       "freelancer":freelancer,"amount":amount,"milestone":milestone,
+                       "deadline_ts":deadline_ts,"deadline":deadline_human}),
+                &format!("Escrow created. Funds locked.{}",
+                    deadline_human.as_deref().map(|d| format!(" Deadline: {d}")).unwrap_or_default()));
         }
         Commands::SubmitWork { contract_id, freelancer_secret } => {
             invoke_stellar_cli(&rpc_url, &network_passphrase, &contract_id, &freelancer_secret, "submit_work", &[])?;
