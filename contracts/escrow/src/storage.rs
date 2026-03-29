@@ -21,9 +21,11 @@ pub type EscrowId = u64;
 pub enum EscrowStatus {
     Active,
     WorkSubmitted,
+    Disputed,
     Completed,
     Cancelled,
     Expired,
+    Resolved,
 }
 
 /// Recipient of accrued yield.
@@ -42,10 +44,11 @@ pub struct EscrowData {
     pub payer: Address,
     /// Address that will receive payment upon approval.
     pub freelancer: Address,
-    /// SEP-41 token contract used for all transfers.
+    pub arbitrator: Address,
     pub token: Address,
     pub amount: i128,
-    pub milestone: String,
+    pub total_amount: i128,
+    pub milestones: Vec<Milestone>,
     pub status: EscrowStatus,
     /// Optional Unix timestamp (seconds) after which the payer may call `expire()`.
     pub deadline: Option<u64>,
@@ -103,7 +106,17 @@ pub struct ProtocolConfig {
     pub fee_collector: Address,
 }
 
-/// Storage keys used for instance storage lookups.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct EscrowConfig {
+    pub deadline: Option<u64>,
+    pub yield_protocol: Option<Address>,
+    pub yield_recipient: YieldRecipient,
+    pub interval: u64,
+    pub recurrence_count: u32,
+}
+
+/// Storage key for the escrow record.
 #[contracttype]
 pub enum DataKey {
     /// Keyed escrow record; the `EscrowId` allows future multi-escrow support.
