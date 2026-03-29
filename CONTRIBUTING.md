@@ -33,9 +33,7 @@ Then open a Pull Request against `main`.
 
 ## Code Style
 
-This project uses [`rustfmt.toml`](../rustfmt.toml) for consistent formatting. The configuration is automatically picked up by `cargo fmt`.
-
-Run these before pushing — CI will enforce both:
+Run these before pushing — CI enforces formatting (`cargo fmt --check --workspace`) and clippy:
 
 ```bash
 cargo fmt --all
