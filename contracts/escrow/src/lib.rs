@@ -2,6 +2,7 @@
 
 mod errors;
 mod events;
+mod nft;
 mod reputation;
 mod storage;
 mod r#yield;
@@ -161,6 +162,7 @@ impl EscrowContract {
         }
 
         storage::save_escrow(&env, &data);
+        nft::mint(&env, &payer);
         events::escrow_created(&env, &payer, &freelancer, &total_amount, &milestones);
         storage::extend_ttl(&env);
         Ok(())
@@ -404,6 +406,24 @@ impl EscrowContract {
         events::payer_transferred(&env, &old, &new_payer);
         storage::extend_ttl(&env);
         Ok(())
+    }
+
+    /// Transfer escrow NFT ownership to `to`.
+    ///
+    /// The caller must be the current NFT owner (= current payer).  This
+    /// atomically updates both the NFT ownership record and `EscrowData.payer`,
+    /// so the new owner immediately gains all payer rights (approve, cancel,
+    /// extend deadline, etc.).
+    pub fn nft_transfer(env: Env, to: Address) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        nft::transfer(&env, &to);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
+    /// Return the current NFT owner address (= current payer).
+    pub fn nft_owner(env: Env) -> Address {
+        nft::owner(&env)
     }
 
     /// Payer extends the escrow deadline to a strictly later timestamp.
