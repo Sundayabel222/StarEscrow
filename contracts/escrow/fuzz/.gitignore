@@ -1,0 +1,4 @@
+# libFuzzer crash/timeout/OOM artifacts — never commit these
+artifacts/
+# libFuzzer coverage data
+coverage/
