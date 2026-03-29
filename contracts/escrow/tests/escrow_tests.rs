@@ -143,6 +143,34 @@ fn test_invalid_amount_fails() {
         .unwrap();
     assert_eq!(err, EscrowError::InvalidAmount);
 }
+#[test]
+fn test_create_zero_amount_fails() {
+    let s = Setup::new();
+    let m = String::from_str(&s.env, "Zero amount milestone");
+    let milestones = soroban_sdk::vec![
+        &s.env,
+        storage::Milestone {
+            description: m.clone(),
+            amount: 0,
+            status: storage::MilestoneStatus::Pending,
+        }
+    ];
+    let err = s.contract
+        .try_create(
+            &s.payer,
+            &s.freelancer,
+            &s.token_addr,
+            &milestones,
+            &None,
+            &None,
+            &YieldRecipient::Payer,
+            &0u64,
+            &0u32,
+        )
+        .unwrap_err()
+        .unwrap();
+    assert_eq!(err, EscrowError::InvalidAmount);
+}
 
 #[test]
 fn test_expire_before_deadline_fails() {
