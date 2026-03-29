@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use sha2::{Sha256, Digest};
 
+mod keypair;
+
 /// StarEscrow CLI — interact with the escrow contract on Stellar Testnet.
 ///
 /// Prerequisites:
@@ -403,11 +405,8 @@ fn run_setup_wizard() -> Result<()> {
     let secret_key = if use_existing {
         Input::<String>::new().with_prompt("Secret key (S...)").interact_text()?
     } else {
-        let out = std::process::Command::new("stellar")
-            .args(["keys", "generate", "--no-fund", "setup-key"])
-            .output()
-            .context("stellar CLI not found")?;
-        let secret = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let kp = keypair::Keypair::generate();
+        let secret = kp.secret_key_str();
         println!("Generated secret key: {secret}");
         secret
     };
@@ -679,9 +678,5 @@ fn invoke_stellar_cli(
 }
 
 fn stellar_address_from_secret(secret: &str) -> Result<String> {
-    let out = std::process::Command::new("stellar")
-        .args(["keys", "address", secret])
-        .output()
-        .context("stellar CLI not found")?;
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    keypair::public_address_from_secret(secret)
 }
