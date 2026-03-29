@@ -25,13 +25,6 @@ impl EscrowContract {
     /// * `admin` - The admin address that will have authority to pause/unpause the contract
     /// * `fee_bps` - Fee in basis points (e.g., 100 = 1%)
     /// * `fee_collector` - The address that will receive collected fees
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully initialized the protocol configuration
-    ///
-    /// # Panics
-    /// * If the configuration already exists
-    /// * If the admin address does not authorize the transaction
     pub fn init(
         env: Env,
         admin: Address,
@@ -53,16 +46,6 @@ impl EscrowContract {
     }
 
     /// Admin pauses all state-changing operations.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully paused the contract
-    /// * `Err(EscrowError::Paused)` - If the contract is already paused
-    ///
-    /// # Panics
-    /// * If the admin address does not authorize the transaction
     pub fn pause(env: Env) -> Result<(), EscrowError> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
@@ -74,16 +57,6 @@ impl EscrowContract {
     }
 
     /// Admin unpauses the contract.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully unpaused the contract
-    /// * `Err(EscrowError::Paused)` - If the contract is not paused
-    ///
-    /// # Panics
-    /// * If the admin address does not authorize the transaction
     pub fn unpause(env: Env) -> Result<(), EscrowError> {
         let mut config = storage::load_config(&env);
         config.admin.require_auth();
@@ -95,6 +68,8 @@ impl EscrowContract {
     }
 
     /// Create escrow. Set `interval > 0` and `recurrence_count > 0` for recurring mode.
+    /// In recurring mode `amount` is the per-release payment; total locked = amount * recurrence_count.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         env: Env,
         payer: Address,
@@ -213,7 +188,7 @@ impl EscrowContract {
         };
         let allowed = storage::read_allowed_tokens(&env);
         if !allowed.is_empty() && !allowed.contains(&token) {
-            return Err(errors::EscrowError::TokenNotAllowed);
+            return Err(EscrowError::TokenNotAllowed);
         }
 
         payer.require_auth();
@@ -221,7 +196,7 @@ impl EscrowContract {
         client.transfer(&payer, &env.current_contract_address(), &amount);
 
         let now = env.ledger().timestamp();
-        let mut data = storage::EscrowData {
+        let mut data = EscrowData {
             payer: payer.clone(),
             freelancer: freelancer.clone(),
             arbitrator: arbitrator.clone(),
@@ -253,8 +228,8 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Freelancer marks milestone as submitted.
-    pub fn submit_work(env: Env, milestone_idx: u32) -> Result<(), EscrowError> {
+    /// Freelancer marks work as submitted (non-recurring mode only).
+    pub fn submit_work(env: Env) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
         if data.status != storage::EscrowStatus::Active
@@ -281,8 +256,8 @@ impl EscrowContract {
         Ok(())
     }
 
-    /// Payer approves specific milestone — releases that milestone's funds.
-    pub fn approve(env: Env, milestone_idx: u32) -> Result<(), EscrowError> {
+    /// Payer approves milestone — releases funds to freelancer (non-recurring mode).
+    pub fn approve(env: Env) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
         if data.status == storage::EscrowStatus::Disputed {
@@ -300,23 +275,19 @@ impl EscrowContract {
         let client = token::Client::new(&env, &data.token);
         let (freelancer_amount, _fee_amount) = if storage::has_config(&env) {
             let config = storage::load_config(&env);
-            let fee = milestone.amount * (config.fee_bps as i128) / 10000;
+            let fee = data.amount * (config.fee_bps as i128) / 10000;
             if fee > 0 {
                 client.transfer(&env.current_contract_address(), &config.fee_collector, &fee);
             }
-            (milestone.amount - fee, fee)
+            (data.amount - fee, fee)
         } else {
-            (milestone.amount, 0)
+            (data.amount, 0)
         };
+        let _ = fee_amount;
 
         client.transfer(&env.current_contract_address(), &data.freelancer, &freelancer_amount);
-        events::milestone_approved(&env, &data.freelancer, milestone_idx, &milestone.description, freelancer_amount);
-        milestone.status = storage::MilestoneStatus::Approved;
-
-        // Check if all milestones approved
-        if data.milestones.iter().all(|m| m.status == storage::MilestoneStatus::Approved) {
-            data.status = storage::EscrowStatus::Completed;
-        }
+        events::payment_released(&env, &data.freelancer, freelancer_amount);
+        data.status = EscrowStatus::Completed;
         storage::save_escrow(&env, &data);
         storage::extend_ttl(&env);
         Ok(())
@@ -367,19 +338,6 @@ impl EscrowContract {
     /// Release the next recurring payment if the interval has elapsed.
     /// Callable by anyone (payer or freelancer) once per interval.
     /// After all recurrences are released the escrow moves to Completed.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully released the next payment
-    /// * `Err(EscrowError::NotRecurring)` - If the escrow is not in recurring mode
-    /// * `Err(EscrowError::NotActive)` - If the escrow is not in active status
-    /// * `Err(EscrowError::RecurrenceComplete)` - If all recurrences have been released
-    /// * `Err(EscrowError::IntervalNotElapsed)` - If the interval has not yet elapsed
-    ///
-    /// # Panics
-    /// * If the contract is paused
     pub fn release_recurring(env: Env) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
@@ -399,7 +357,6 @@ impl EscrowContract {
             return Err(EscrowError::IntervalNotElapsed);
         }
 
-        // Apply fee per release
         let client = token::Client::new(&env, &data.token);
         let (release_amount, fee_amount) = if storage::has_config(&env) {
             let config = storage::load_config(&env);
@@ -430,17 +387,6 @@ impl EscrowContract {
     }
 
     /// Payer cancels escrow — refunds remaining locked funds.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully cancelled the escrow and refunded funds
-    /// * `Err(EscrowError::NotActive)` - If the escrow is not in active status
-    ///
-    /// # Panics
-    /// * If the payer address does not authorize the transaction
-    /// * If the contract is paused
     pub fn cancel(env: Env) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
@@ -471,19 +417,6 @@ impl EscrowContract {
     }
 
     /// Payer reclaims funds after the deadline has passed.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully expired the escrow and refunded funds
-    /// * `Err(EscrowError::NotActive)` - If the escrow is not in active status
-    /// * `Err(EscrowError::NotExpired)` - If no deadline was set
-    /// * `Err(EscrowError::DeadlineNotPassed)` - If the deadline has not yet passed
-    ///
-    /// # Panics
-    /// * If the payer address does not authorize the transaction
-    /// * If the contract is paused
     pub fn expire(env: Env) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
@@ -523,17 +456,6 @@ impl EscrowContract {
     }
 
     /// Current freelancer transfers their role to a new address.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    /// * `new_freelancer` - The new freelancer address that will receive the role
-    ///
-    /// # Returns
-    /// * `Ok(())` - Successfully transferred the freelancer role
-    ///
-    /// # Panics
-    /// * If the current freelancer address does not authorize the transaction
-    /// * If the contract is paused
     pub fn transfer_freelancer(env: Env, new_freelancer: Address) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
@@ -546,6 +468,7 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Current payer transfers their role to a new address.
     pub fn transfer_payer(env: Env, new_payer: Address) -> Result<(), EscrowError> {
         Self::assert_not_paused(&env)?;
         let mut data = storage::load_escrow(&env);
@@ -578,11 +501,32 @@ impl EscrowContract {
         Ok(())
     }
 
-    pub fn get_status(env: Env) -> storage::EscrowStatus {
+    /// Payer updates the milestone description while escrow is Active.
+    pub fn update_milestone(env: Env, new_milestone: String) -> Result<(), EscrowError> {
+        Self::assert_not_paused(&env)?;
+        let mut data = storage::load_escrow(&env);
+        if data.status != EscrowStatus::Active {
+            return Err(EscrowError::NotActive);
+        }
+        data.payer.require_auth();
+        let old = data.milestone.clone();
+        data.milestone = new_milestone.clone();
+        storage::save_escrow(&env, &data);
+        events::milestone_updated(&env, &old, &new_milestone);
+        storage::extend_ttl(&env);
+        Ok(())
+    }
+
+    /// Returns the contract's token balance for the given token address.
+    pub fn get_balance(env: Env, token: Address) -> i128 {
+        token::Client::new(&env, &token).balance(&env.current_contract_address())
+    }
+
+    pub fn get_status(env: Env) -> EscrowStatus {
         storage::load_escrow(&env).status
     }
 
-    pub fn get_escrow(env: Env) -> storage::EscrowData {
+    pub fn get_escrow(env: Env) -> EscrowData {
         storage::load_escrow(&env)
     }
 

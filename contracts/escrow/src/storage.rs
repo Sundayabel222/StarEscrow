@@ -36,27 +36,13 @@ pub enum YieldRecipient {
     Freelancer,
 }
 
-#[contracttype]
-#[derive(Clone, PartialEq, Debug)]
-pub enum MilestoneStatus {
-    Pending,
-    Submitted,
-    Approved,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct Milestone {
-    pub description: String,
-    pub amount: i128,
-    pub status: MilestoneStatus,
-}
-
 /// The core escrow data stored on-chain.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct EscrowData {
+    /// Address that created the escrow and funds it.
     pub payer: Address,
+    /// Address that will receive payment upon approval.
     pub freelancer: Address,
     pub arbitrator: Address,
     pub token: Address,
@@ -64,9 +50,13 @@ pub struct EscrowData {
     pub total_amount: i128,
     pub milestones: Vec<Milestone>,
     pub status: EscrowStatus,
+    /// Optional Unix timestamp (seconds) after which the payer may call `expire()`.
     pub deadline: Option<u64>,
+    /// Optional external yield protocol that holds the principal while work is in progress.
     pub yield_protocol: Option<Address>,
+    /// Amount deposited into the yield protocol; used to calculate accrued yield on withdrawal.
     pub principal_deposited: i128,
+    /// Who receives any accrued yield when funds are released or refunded.
     pub yield_recipient: YieldRecipient,
     /// Recurring mode: interval in seconds between releases (0 = disabled).
     pub interval: u64,
@@ -129,19 +119,26 @@ pub struct EscrowConfig {
 /// Storage key for the escrow record.
 #[contracttype]
 pub enum DataKey {
+    /// Keyed escrow record; the `EscrowId` allows future multi-escrow support.
     Escrow(EscrowId),
+    /// Protocol-level configuration (admin, fee, pause state).
     Config,
+    /// Optional on-chain reputation contract address.
     ReputationContract,
 }
 
 const DEFAULT_ESCROW_ID: EscrowId = 0;
 
+/// Persist the escrow record to instance storage, overwriting any previous value.
 pub fn save_escrow(env: &Env, data: &EscrowData) {
     env.storage()
         .instance()
         .set(&DataKey::Escrow(DEFAULT_ESCROW_ID), data);
 }
 
+/// Load the escrow record from instance storage.
+///
+/// Panics if no escrow has been created yet; callers should guard with [`has_escrow`].
 pub fn load_escrow(env: &Env) -> EscrowData {
     env.storage()
         .instance()
@@ -149,6 +146,7 @@ pub fn load_escrow(env: &Env) -> EscrowData {
         .expect("escrow not initialised")
 }
 
+/// Returns `true` if an escrow record exists in instance storage.
 pub fn has_escrow(env: &Env) -> bool {
     env.storage()
         .instance()

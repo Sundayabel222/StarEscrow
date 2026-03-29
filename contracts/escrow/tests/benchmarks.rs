@@ -87,7 +87,7 @@ fn bench_create() {
 }
 
 #[test]
-fn bench_submit_work() {
+fn bench_submit() {
     let s = BenchSetup::new();
     s.simple_create("bench milestone");
     s.env.budget().reset_default();
